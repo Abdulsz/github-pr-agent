@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "github-pr-agent",
+  "main": "src/server.ts",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Workers AI binding for code generation
+  "ai": {
+    "binding": "AI"
+  },
+
+  // Durable Objects for the agent
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GitHubPRAgent",
+        "class_name": "GitHubPRAgent"
+      }
+    ]
+  },
+
+  // Migrations for SQLite storage
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GitHubPRAgent"]
+    }
+  ],
+
+  // Assets for the frontend
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS"
+  },
+
+  // Development settings
+  "dev": {
+    "port": 8787
+  }
+}
