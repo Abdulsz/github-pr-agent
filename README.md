@@ -1,26 +1,21 @@
 # GitHub PR Agent
 
-[![Deploy to Cloudflare](https://img.shields.io/badge/Deploy-Cloudflare-orange)](https://github-pr-agent.zakariatimalma.workers.dev/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
 An AI-powered agent that creates GitHub pull requests from natural language descriptions. Built entirely on Cloudflare's platform using:
 
-🚀 **[Try it live!](https://github-pr-agent.zakariatimalma.workers.dev/)**
-
 - **Cloudflare Agents SDK** - Stateful, durable agents with WebSocket support
-- **Workers AI** - AI inference for code generation (Llama 3.3 70B)
-- **GitHub MCP Server** - Model Context Protocol integration for GitHub operations
+- **Workers AI** - AI inference for code generation (Llama 3.3 70B / Llama 3.1 8B)
+- **GitHub REST API** - Direct API integration for GitHub operations
 - **Durable Objects** - Persistent state and real-time sync
 - **React** - Modern frontend with Vite
 
 ## ✨ Features
 
-- 🔐 **Connect to GitHub via OAuth** - Secure authentication using MCP
+- 🔐 **GitHub Personal Access Token** - Simple, secure authentication
 - 💬 **Natural Language Input** - Describe fixes/features in plain English
 - 🤖 **AI Code Generation** - Intelligent analysis and code changes
 - 🌿 **Automatic PR Creation** - Creates branches and pull requests automatically
 - ⚡ **Real-time Updates** - Live progress via WebSocket
-- 💾 **Persistent State** - State preserved across sessions
+- 💾 **Persistent State** - Token and state preserved across sessions
 
 ## Architecture
 
@@ -32,8 +27,8 @@ An AI-powered agent that creates GitHub pull requests from natural language desc
                         │  │      (Durable Object)              │  │
                         │  │                                    │  │
                         │  │  ┌─────────┐    ┌──────────────┐   │  │
-                        │  │  │Workers  │    │  GitHub MCP  │   │  │
-                        │  │  │   AI    │    │   Server     │   │  │
+                        │  │  │Workers  │    │ GitHub REST  │   │  │
+                        │  │  │   AI    │    │     API      │   │  │
                         │  │  └─────────┘    └──────────────┘   │  │
                         │  └────────────────────────────────────┘  │
                         └──────────────────────────────────────────┘
@@ -45,6 +40,7 @@ An AI-powered agent that creates GitHub pull requests from natural language desc
 
 - Node.js 20.x or later
 - A Cloudflare account
+- A GitHub Personal Access Token with `repo` scope
 - Wrangler CLI (included in dependencies)
 
 ### 📦 Installation
@@ -83,19 +79,21 @@ npm run deploy
 
 ## 📖 Usage
 
-1. **Connect to GitHub** - Click "Connect to GitHub" and authorize the application
-2. **Enter Repository** - Provide the repository URL (e.g., `owner/repo` or full GitHub URL)
-3. **Describe Changes** - Write a natural language description of the fix or feature you want
-4. **Create PR** - Click "Create PR" and watch the progress in real-time
-5. **View Result** - Once complete, click the link to view your new pull request
+1. **Get a GitHub Token** - Create a Personal Access Token at [GitHub Settings](https://github.com/settings/tokens/new?scopes=repo) with `repo` scope
+2. **Connect to GitHub** - Enter your token and click "Connect to GitHub"
+3. **Enter Repository** - Provide the repository URL (e.g., `owner/repo` or full GitHub URL)
+4. **Describe Changes** - Write a natural language description of the fix or feature you want
+5. **Create PR** - Click "Create PR" and watch the progress in real-time
+6. **View Result** - Once complete, click the link to view your new pull request
 
 ## 🔧 How It Works
 
 1. **User Input** - You describe what you want to change in plain English
-2. **GitHub Connection** - The agent connects to GitHub via the MCP (Model Context Protocol) server
-3. **AI Analysis** - Workers AI (Llama 3.3 70B) analyzes your request and the repository structure
-4. **Code Generation** - The AI generates the necessary code changes
-5. **PR Creation** - The agent creates a new branch, commits the changes, and opens a pull request
+2. **GitHub Connection** - The agent authenticates using your Personal Access Token via the GitHub REST API
+3. **Repository Analysis** - Fetches repo structure and key files (index.html, README, etc.)
+4. **AI Analysis** - Workers AI (Llama 3.3 70B with 8B fallback) analyzes your request
+5. **Code Generation** - The AI generates the necessary code changes as JSON
+6. **PR Creation** - The agent creates a new branch, commits the changes, and opens a pull request
 
 ## 📁 Project Structure
 
@@ -155,10 +153,11 @@ The agent state is persisted using Durable Objects with SQLite storage:
 
 | Method | Description |
 |--------|-------------|
-| `connectToGitHub()` | Initiates GitHub OAuth connection |
-| `checkGitHubStatus()` | Returns connection status and available tools |
+| `setGitHubToken(token)` | Authenticates with GitHub using a Personal Access Token |
+| `checkGitHubStatus()` | Returns connection status and username |
 | `createPR(request)` | Creates a pull request from the given request |
-| `reset()` | Resets the agent state |
+| `reset()` | Resets the agent state (preserves GitHub connection) |
+| `disconnect()` | Disconnects from GitHub and clears stored token |
 | `getStatus()` | Returns current agent status |
 
 ### PRRequest Type
@@ -176,13 +175,14 @@ interface PRRequest {
 
 - The AI model has context limits, so very large codebases may require more specific instructions
 - Complex multi-file changes may need multiple iterations
-- The agent requires GitHub OAuth authorization for each user session
+- Long descriptions may be truncated to fit within token limits
+- The 70B model may timeout under heavy load (falls back to 8B automatically)
 
 ## 🔗 Resources
 
 - [Cloudflare Agents SDK Documentation](https://developers.cloudflare.com/agents/)
 - [Workers AI Models](https://developers.cloudflare.com/workers-ai/models/)
-- [GitHub MCP Server](https://github.com/modelcontextprotocol/servers)
+- [GitHub REST API](https://docs.github.com/en/rest)
 - [Durable Objects](https://developers.cloudflare.com/durable-objects/)
 
 ## License
