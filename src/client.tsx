@@ -2,15 +2,13 @@ import { useState, useCallback } from "react";
 import { useAgent } from "agents/react";
 import type { AgentState, PRRequest } from "./types";
 
-// Styles
+// Styles — minimal black UI, white font, subtle borders
 const styles = {
   container: {
     minHeight: "100vh",
-    background:
-      "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
+    background: "#000",
     color: "#fff",
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontFamily: '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif',
   },
   main: {
     maxWidth: "800px",
@@ -24,35 +22,35 @@ const styles = {
   title: {
     fontSize: "2.5rem",
     fontWeight: 700,
-    background: "linear-gradient(90deg, #f89b29, #ff6b6b)",
-    WebkitBackgroundClip: "text",
-    WebkitTextFillColor: "transparent",
+    color: "#fff",
     marginBottom: "0.5rem",
+    letterSpacing: "-0.02em",
   },
   subtitle: {
-    color: "#a0aec0",
+    color: "#888",
     fontSize: "1.1rem",
   },
   card: {
-    background: "rgba(255, 255, 255, 0.05)",
+    background: "rgba(255, 255, 255, 0.06)",
+    backdropFilter: "blur(12px)",
+    WebkitBackdropFilter: "blur(12px)",
     borderRadius: "16px",
     padding: "2rem",
     marginBottom: "1.5rem",
-    backdropFilter: "blur(10px)",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
+    border: "1px solid rgba(255, 255, 255, 0.12)",
   },
   label: {
     display: "block",
     marginBottom: "0.5rem",
     fontWeight: 500,
-    color: "#e2e8f0",
+    color: "#fff",
   },
   input: {
     width: "100%",
     padding: "0.75rem 1rem",
-    borderRadius: "8px",
+    borderRadius: "12px",
     border: "1px solid rgba(255, 255, 255, 0.2)",
-    background: "rgba(255, 255, 255, 0.1)",
+    background: "rgba(255, 255, 255, 0.06)",
     color: "#fff",
     fontSize: "1rem",
     marginBottom: "1rem",
@@ -63,9 +61,9 @@ const styles = {
   textarea: {
     width: "100%",
     padding: "0.75rem 1rem",
-    borderRadius: "8px",
+    borderRadius: "12px",
     border: "1px solid rgba(255, 255, 255, 0.2)",
-    background: "rgba(255, 255, 255, 0.1)",
+    background: "rgba(255, 255, 255, 0.06)",
     color: "#fff",
     fontSize: "1rem",
     marginBottom: "1rem",
@@ -77,41 +75,43 @@ const styles = {
   },
   button: {
     padding: "0.875rem 2rem",
-    borderRadius: "8px",
-    border: "none",
+    borderRadius: "12px",
+    border: "1px solid rgba(255, 255, 255, 0.2)",
     fontWeight: 600,
     fontSize: "1rem",
     cursor: "pointer",
-    transition: "all 0.2s",
+    transition: "border-color 0.2s, opacity 0.2s",
   },
   primaryButton: {
-    background: "linear-gradient(90deg, #f89b29, #ff6b6b)",
-    color: "#fff",
+    background: "#fff",
+    color: "#000",
+    borderColor: "#fff",
   },
   secondaryButton: {
-    background: "rgba(255, 255, 255, 0.1)",
+    background: "transparent",
     color: "#fff",
     marginLeft: "1rem",
   },
   disabledButton: {
-    opacity: 0.6,
+    opacity: 0.5,
     cursor: "not-allowed",
   },
   statusBadge: {
     display: "inline-flex",
     alignItems: "center",
     padding: "0.25rem 0.75rem",
-    borderRadius: "9999px",
+    borderRadius: "12px",
     fontSize: "0.875rem",
     fontWeight: 500,
+    border: "1px solid rgba(255, 255, 255, 0.12)",
   },
   connectedBadge: {
-    background: "rgba(72, 187, 120, 0.2)",
-    color: "#48bb78",
+    borderColor: "rgba(255, 255, 255, 0.4)",
+    color: "#fff",
   },
   disconnectedBadge: {
-    background: "rgba(245, 101, 101, 0.2)",
-    color: "#f56565",
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    color: "#888",
   },
   progressList: {
     listStyle: "none",
@@ -120,49 +120,78 @@ const styles = {
   },
   progressItem: {
     padding: "0.5rem 0",
-    borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+    borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
     display: "flex",
     alignItems: "center",
     gap: "0.5rem",
   },
   successBox: {
-    background: "rgba(72, 187, 120, 0.1)",
-    border: "1px solid rgba(72, 187, 120, 0.3)",
-    borderRadius: "8px",
+    background: "rgba(255, 255, 255, 0.06)",
+    backdropFilter: "blur(12px)",
+    WebkitBackdropFilter: "blur(12px)",
+    border: "1px solid rgba(255, 255, 255, 0.2)",
+    borderRadius: "16px",
     padding: "1rem",
   },
   errorBox: {
-    background: "rgba(245, 101, 101, 0.1)",
-    border: "1px solid rgba(245, 101, 101, 0.3)",
-    borderRadius: "8px",
+    background: "rgba(255, 255, 255, 0.06)",
+    backdropFilter: "blur(12px)",
+    WebkitBackdropFilter: "blur(12px)",
+    border: "1px solid rgba(255, 255, 255, 0.2)",
+    borderRadius: "16px",
     padding: "1rem",
   },
   link: {
-    color: "#f89b29",
-    textDecoration: "none",
+    color: "#fff",
+    textDecoration: "underline",
+    textUnderlineOffset: "2px",
     fontWeight: 500,
   },
   spinner: {
     width: "16px",
     height: "16px",
-    border: "2px solid rgba(255, 255, 255, 0.3)",
-    borderTopColor: "#f89b29",
+    border: "2px solid rgba(255, 255, 255, 0.2)",
+    borderTopColor: "#fff",
     borderRadius: "50%",
     animation: "spin 1s linear infinite",
     display: "inline-block",
   },
   helpText: {
     fontSize: "0.85rem",
-    color: "#718096",
+    color: "#888",
     marginTop: "0.25rem",
     marginBottom: "1rem",
   },
+  planCard: {
+    marginBottom: "1rem",
+  },
+  stepList: {
+    listStyle: "none",
+    padding: 0,
+    margin: 0,
+  },
+  stepItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "0.5rem",
+    padding: "0.5rem 0",
+    borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+    fontSize: "0.9rem",
+  },
+  stepIcon: {
+    width: "20px",
+    textAlign: "center" as const,
+    fontWeight: 600,
+  },
 };
 
-// Add keyframes for spinner
+// Add keyframes for spinner + minimal focus styles
 const spinnerKeyframes = `
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+input:focus, textarea:focus {
+  border-color: rgba(255, 255, 255, 0.4);
 }
 `;
 
@@ -180,6 +209,7 @@ export default function App() {
   const [githubToken, setGithubToken] = useState("");
   const [githubUsername, setGithubUsername] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [useReAct, setUseReAct] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [localState, setLocalState] = useState<AgentState>(defaultState);
@@ -262,13 +292,13 @@ export default function App() {
       };
 
       try {
-        await agent.call("createPR", [request]);
+        await agent.call(useReAct ? "createPRReAct" : "createPR", [request]);
       } catch (error) {
         console.error("Failed to create PR:", error);
         setIsSubmitting(false);
       }
     },
-    [agent, repoUrl, description, branchName]
+    [agent, repoUrl, description, branchName, useReAct]
   );
 
   const handleReset = useCallback(async () => {
@@ -369,7 +399,7 @@ export default function App() {
 
               {connectionError && (
                 <div style={{ ...styles.errorBox, marginBottom: "1rem" }}>
-                  <p style={{ margin: 0, color: "#f56565" }}>
+                  <p style={{ margin: 0, color: "#fff" }}>
                     {connectionError}
                   </p>
                 </div>
@@ -444,24 +474,46 @@ export default function App() {
             <div
               style={{
                 display: "flex",
-                justifyContent: "flex-end",
+                alignItems: "center",
+                justifyContent: "space-between",
                 gap: "1rem",
+                flexWrap: "wrap",
               }}
             >
-              <button
-                type="button"
-                onClick={handleReset}
+              <label
                 style={{
-                  ...styles.button,
-                  ...styles.secondaryButton,
-                  marginLeft: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  cursor: "pointer",
+                  color: "#fff",
                 }}
-                disabled={isLoading}
               >
-                Reset
-              </button>
-              <button
-                type="submit"
+                <input
+                  type="checkbox"
+                  checked={useReAct}
+                  onChange={(e) => setUseReAct(e.target.checked)}
+                  disabled={isLoading}
+                />
+                <span title="ReAct: Agent reasons autonomously and uses tools to explore the repo before creating the PR">
+                  ReAct (autonomous reasoning)
+                </span>
+              </label>
+              <div style={{ display: "flex", gap: "1rem" }}>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  style={{
+                    ...styles.button,
+                    ...styles.secondaryButton,
+                    marginLeft: 0,
+                  }}
+                  disabled={isLoading}
+                >
+                  Reset
+                </button>
+                <button
+                  type="submit"
                 style={{
                   ...styles.button,
                   ...styles.primaryButton,
@@ -480,24 +532,84 @@ export default function App() {
                     }}
                   >
                     <span style={styles.spinner} />
-                    Processing...
+                    {useReAct ? "ReAct reasoning..." : "Processing..."}
                   </span>
                 ) : (
-                  "Create PR"
+                  useReAct ? "Create PR (ReAct)" : "Create PR"
                 )}
               </button>
+              </div>
             </div>
           </form>
         </div>
 
-        {/* Progress */}
-        {state.progressMessages.length > 0 && (
+        {/* Execution plan (structured steps) — only while running, hide when result exists */}
+        {state.plan && state.plan.steps.length > 0 && !state.result && (
+          <div style={{ ...styles.card, ...styles.planCard }}>
+            <h3 style={{ marginTop: 0, marginBottom: "0.5rem" }}>
+              Execution plan
+            </h3>
+            <p
+              style={{
+                margin: "0 0 1rem 0",
+                fontSize: "0.875rem",
+                color: "#888",
+              }}
+            >
+              Step {state.plan.currentStepIndex + 1} of {state.plan.steps.length}
+            </p>
+            <ul style={styles.stepList}>
+              {state.plan.steps.map((step, idx) => {
+                const icon =
+                  step.status === "completed"
+                    ? "✓"
+                    : step.status === "running"
+                      ? "●"
+                      : step.status === "error"
+                        ? "✗"
+                        : "○";
+                const color =
+                  step.status === "completed"
+                    ? "#fff"
+                    : step.status === "running"
+                      ? "#fff"
+                      : step.status === "error"
+                        ? "#fff"
+                        : "#888";
+                return (
+                  <li key={step.id} style={styles.stepItem}>
+                    <span style={{ ...styles.stepIcon, color }}>{icon}</span>
+                    <span
+                      style={{
+                        color:
+                          step.status === "pending"
+                            ? "#888"
+                            : "#fff",
+                      }}
+                    >
+                      {step.label}
+                    </span>
+                    {step.error && (
+                      <span style={{ color: "#fff", fontSize: "0.8rem", opacity: 0.9 }}>
+                        {" "}
+                        — {step.error}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {/* Progress — only while running, hide when result exists so old runs don't linger */}
+        {state.progressMessages.length > 0 && !state.result && (
           <div style={styles.card}>
             <h3 style={{ marginTop: 0, marginBottom: "1rem" }}>Progress</h3>
             <ul style={styles.progressList}>
               {state.progressMessages.map((msg: string, idx: number) => (
                 <li key={idx} style={styles.progressItem}>
-                  <span style={{ color: "#48bb78" }}>→</span>
+                  <span style={{ color: "#fff" }}>→</span>
                   {msg}
                 </li>
               ))}
@@ -514,7 +626,7 @@ export default function App() {
                   style={{
                     marginTop: 0,
                     marginBottom: "0.5rem",
-                    color: "#48bb78",
+                    color: "#fff",
                   }}
                 >
                   ✓ PR Created Successfully!
@@ -541,7 +653,7 @@ export default function App() {
                   style={{
                     marginTop: 0,
                     marginBottom: "0.5rem",
-                    color: "#f56565",
+                    color: "#fff",
                   }}
                 >
                   ✗ Error
@@ -557,7 +669,7 @@ export default function App() {
           style={{
             textAlign: "center",
             marginTop: "2rem",
-            color: "#718096",
+            color: "#888",
             fontSize: "0.875rem",
           }}
         >

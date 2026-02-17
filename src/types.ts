@@ -26,6 +26,23 @@ export interface PRResult {
   branchName?: string;
 }
 
+/** A single step in the execution plan */
+export interface PlanStep {
+  id: string;
+  label: string;
+  status: "pending" | "running" | "completed" | "skipped" | "error";
+  startedAt?: number;
+  completedAt?: number;
+  error?: string;
+}
+
+/** Structured execution plan for PR creation */
+export interface ExecutionPlan {
+  steps: PlanStep[];
+  currentStepIndex: number;
+  createdAt: number;
+}
+
 export interface AgentState {
   // Current task status
   status:
@@ -57,6 +74,9 @@ export interface AgentState {
 
   // Error message if any
   errorMessage?: string;
+
+  // Structured multi-step execution plan
+  plan?: ExecutionPlan;
 }
 
 export interface ChatMessage {
