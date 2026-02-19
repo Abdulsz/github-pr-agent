@@ -1,6 +1,7 @@
 import { Agent, routeAgentRequest, callable } from "agents";
 import type { Env, AgentState, PRRequest, FileChange, PRResult, ExecutionPlan, PlanStep } from "./types";
 import { runReActAgent } from "./react-agent";
+import { handleFeedbackRoutes } from "./feedback/routes";
 
 // Structured plan step IDs for PR creation (order defines execution)
 const PLAN_STEP_IDS = [
@@ -868,18 +869,34 @@ Output ONLY the JSON array. Start with [ end with ]`;
   }
 }
 
-// Route requests to agents
+// Route requests to agents and feedback service
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
-    // Serve static files for the frontend
-    if (url.pathname === "/" || url.pathname.startsWith("/assets")) {
-      // This will be handled by Vite in development
-      // and by the built assets in production
+    // Handle feedback/dashboard API routes
+    if (url.pathname.startsWith("/api/")) {
+      const feedbackResponse = await handleFeedbackRoutes(request, env, url.pathname);
+      if (feedbackResponse) return feedbackResponse;
     }
 
-    // Route agent requests
+    // Serve embed.js from assets (the public/ dir gets bundled into dist/)
+    if (url.pathname === "/embed.js") {
+      const assetUrl = new URL("/embed.js", request.url);
+      const assetRequest = new Request(assetUrl.toString(), request);
+      const assetResponse = await env.ASSETS.fetch(assetRequest);
+      if (assetResponse.ok) {
+        return new Response(assetResponse.body, {
+          headers: {
+            ...Object.fromEntries(assetResponse.headers.entries()),
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+          },
+        });
+      }
+    }
+
+    // Route agent requests (WebSocket / Durable Objects)
     return (
       (await routeAgentRequest(request, env)) ??
       new Response("Not found", { status: 404 })

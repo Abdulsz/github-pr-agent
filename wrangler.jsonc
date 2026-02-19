@@ -28,11 +28,21 @@
     }
   ],
 
-  // Assets for the frontend
+  // Assets for the frontend (SPA routing: serve index.html for unknown paths)
   "assets": {
     "directory": "dist",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
   },
+
+  // D1 database for feedback service
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "feedback-db",
+      "database_id": "2e0a47fe-0eeb-4e6c-8e23-558cbf91899f"
+    }
+  ],
 
   // Development settings
   "dev": {
