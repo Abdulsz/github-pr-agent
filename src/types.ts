@@ -1,8 +1,11 @@
-// Type definitions for the GitHub PR Agent
+// Type definitions for the GitHub PR Agent + Feedback Service
 
 export interface Env {
   AI: Ai;
+  DB: D1Database;
+  ASSETS: Fetcher;
   GitHubPRAgent: DurableObjectNamespace;
+  JWT_SECRET: string;
   OPENAI_API_KEY?: string;
 }
 
@@ -83,4 +86,71 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: number;
+}
+
+// --- Feedback Service Types ---
+
+export interface FeedbackSubmission {
+  projectId: string;
+  title: string;
+  description: string;
+  email?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface Feedback {
+  id: string;
+  projectId: string;
+  type: "technical" | "non-technical";
+  category?: "bug" | "feature" | "improvement" | "general";
+  title: string;
+  description: string;
+  email?: string;
+  status: "pending" | "in-progress" | "completed" | "dismissed";
+  metadata?: Record<string, unknown>;
+  aiAnalysis?: FeedbackClassification;
+  relatedPRUrl?: string;
+  relatedPRNumber?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedbackClassification {
+  type: "technical" | "non-technical";
+  confidence: number;
+  category?: "bug" | "feature" | "improvement" | "general";
+  extractedInfo?: Record<string, string>;
+}
+
+export interface FeedbackProject {
+  id: string;
+  name: string;
+  apiKey: string;
+  description?: string;
+  ownerId: string;
+  githubToken?: string;
+  githubRepo?: string;
+  settings: FeedbackProjectSettings;
+  createdAt: string;
+}
+
+export interface FeedbackProjectSettings {
+  enableAutoPR: boolean;
+  autoClassify: boolean;
+  prAssignee?: string;
+  defaultTargetBranch?: string;
+}
+
+export interface DashboardUser {
+  id: string;
+  email: string;
+  passwordHash: string;
+  name?: string;
+  createdAt: string;
+}
+
+export interface ApiResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
 }

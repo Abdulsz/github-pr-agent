@@ -10,12 +10,17 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Proxy agent requests to the Wrangler dev server
       "/agents": {
         target: "http://localhost:8787",
         ws: true,
         changeOrigin: true,
       },
+      "/api": {
+        target: "http://localhost:8787",
+        changeOrigin: true,
+      },
     },
   },
+  // SPA fallback: serve index.html for all non-file routes
+  appType: "spa",
 });

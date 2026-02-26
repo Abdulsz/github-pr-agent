@@ -1,8 +1,13 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useAgent } from "agents/react";
 import type { AgentState, PRRequest } from "./types";
+import { AuthPage } from "./auth/AuthPage";
+import { ProjectsPage } from "./dashboard/ProjectsPage";
+import { Dashboard } from "./dashboard/Dashboard";
 
-// Styles — minimal black UI, white font, subtle borders
+type Page = "auth" | "projects" | "dashboard" | "pr-agent";
+
+// Styles -- minimal black UI, white font, subtle borders
 const styles = {
   container: {
     minHeight: "100vh",
@@ -185,7 +190,6 @@ const styles = {
   },
 };
 
-// Add keyframes for spinner + minimal focus styles
 const spinnerKeyframes = `
 @keyframes spin {
   to { transform: rotate(360deg); }
@@ -195,14 +199,112 @@ input:focus, textarea:focus {
 }
 `;
 
-// Default state
 const defaultState: AgentState = {
   status: "idle",
   githubConnected: false,
   progressMessages: [],
 };
 
+function getInitialPage(): { page: Page; projectId?: string } {
+  const path = window.location.pathname;
+  const params = new URLSearchParams(window.location.search);
+  const token = localStorage.getItem("authToken");
+
+  if (path === "/dashboard" || path.startsWith("/dashboard")) {
+    if (!token) return { page: "auth" };
+    const pid = params.get("projectId");
+    if (pid) return { page: "dashboard", projectId: pid };
+    return { page: "projects" };
+  }
+
+  if (path === "/projects") {
+    return token ? { page: "projects" } : { page: "auth" };
+  }
+
+  if (path === "/auth") {
+    return { page: "auth" };
+  }
+
+  // Root path: show PR agent (the original page)
+  return { page: "pr-agent" };
+}
+
 export default function App() {
+  const initial = getInitialPage();
+  const [page, setPage] = useState<Page>(initial.page);
+  const [authToken, setAuthToken] = useState<string | null>(localStorage.getItem("authToken"));
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(initial.projectId || "");
+
+  function navigate(newPage: Page, projectId?: string) {
+    setPage(newPage);
+    if (projectId !== undefined) setSelectedProjectId(projectId);
+
+    let path = "/";
+    if (newPage === "auth") path = "/auth";
+    else if (newPage === "projects") path = "/projects";
+    else if (newPage === "dashboard" && projectId) path = `/dashboard?projectId=${projectId}`;
+    else if (newPage === "dashboard") path = "/dashboard";
+    window.history.pushState({}, "", path);
+  }
+
+  useEffect(() => {
+    function onPopState() {
+      const { page: p, projectId } = getInitialPage();
+      setPage(p);
+      if (projectId) setSelectedProjectId(projectId);
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  function handleAuth(token: string, _user: { id: string; email: string; name?: string }) {
+    setAuthToken(token);
+    navigate("projects");
+  }
+
+  function handleLogout() {
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("authUser");
+    setAuthToken(null);
+    navigate("auth");
+  }
+
+  if (page === "auth") {
+    return <AuthPage onAuth={handleAuth} />;
+  }
+
+  if (page === "projects" && authToken) {
+    return (
+      <ProjectsPage
+        token={authToken}
+        onLogout={handleLogout}
+        onSelectProject={(pid) => navigate("dashboard", pid)}
+      />
+    );
+  }
+
+  if (page === "dashboard" && authToken && selectedProjectId) {
+    return (
+      <Dashboard
+        projectId={selectedProjectId}
+        token={authToken}
+        onBack={() => navigate("projects")}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  // If we need auth but don't have a token, redirect
+  if ((page === "projects" || page === "dashboard") && !authToken) {
+    return <AuthPage onAuth={handleAuth} />;
+  }
+
+  // Default: PR Agent page
+  return <PRAgentPage onNavigate={navigate} />;
+}
+
+// Original PR Agent page extracted as a component
+function PRAgentPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
   const [repoUrl, setRepoUrl] = useState("");
   const [description, setDescription] = useState("");
   const [branchName, setBranchName] = useState("");
@@ -214,7 +316,6 @@ export default function App() {
   const [connectionError, setConnectionError] = useState("");
   const [localState, setLocalState] = useState<AgentState>(defaultState);
 
-  // Connect to the GitHub PR Agent
   const agent = useAgent({
     agent: "GitHubPRAgent",
     onStateUpdate: (state: AgentState) => {
@@ -225,10 +326,7 @@ export default function App() {
     },
   });
 
-  // Use local state or default
   const state = localState;
-
-  // Get username from state if available (for persistence)
   const displayUsername = githubUsername || (state as AgentState & { githubUsername?: string }).githubUsername || "user";
 
   const handleConnectGitHub = useCallback(async () => {
@@ -236,30 +334,22 @@ export default function App() {
       setConnectionError("Please enter your GitHub Personal Access Token");
       return;
     }
-
     setIsConnecting(true);
     setConnectionError("");
-
     try {
       const result = await agent.call("setGitHubToken", [githubToken]);
       if (result && typeof result === "object") {
-        const typedResult = result as {
-          connected: boolean;
-          username?: string;
-          error?: string;
-        };
+        const typedResult = result as { connected: boolean; username?: string; error?: string };
         if (typedResult.connected && typedResult.username) {
           setGithubUsername(typedResult.username);
-          setGithubToken(""); // Clear token from UI for security
+          setGithubToken("");
         } else if (typedResult.error) {
           setConnectionError(typedResult.error);
         }
       }
     } catch (error) {
       console.error("Failed to connect to GitHub:", error);
-      setConnectionError(
-        error instanceof Error ? error.message : "Failed to connect"
-      );
+      setConnectionError(error instanceof Error ? error.message : "Failed to connect");
     } finally {
       setIsConnecting(false);
     }
@@ -277,20 +367,12 @@ export default function App() {
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-
       if (!repoUrl || !description) {
         alert("Please fill in the repository URL and description");
         return;
       }
-
       setIsSubmitting(true);
-
-      const request: PRRequest = {
-        repoUrl,
-        description,
-        branchName: branchName || undefined,
-      };
-
+      const request: PRRequest = { repoUrl, description, branchName: branchName || undefined };
       try {
         await agent.call(useReAct ? "createPRReAct" : "createPR", [request]);
       } catch (error) {
@@ -316,17 +398,33 @@ export default function App() {
   const isLoading =
     isSubmitting ||
     isConnecting ||
-    ["connecting", "analyzing", "generating", "creating_pr"].includes(
-      state.status
-    );
+    ["connecting", "analyzing", "generating", "creating_pr"].includes(state.status);
 
   return (
     <div style={styles.container}>
       <style>{spinnerKeyframes}</style>
       <main style={styles.main}>
-        {/* Header */}
         <header style={styles.header}>
-          <h1 style={styles.title}>GitHub PR Agent</h1>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h1 style={styles.title}>GitHub PR Agent</h1>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button
+                onClick={() => onNavigate("projects")}
+                style={{
+                  color: "#888",
+                  textDecoration: "none",
+                  fontSize: "0.9rem",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  padding: "6px 14px",
+                  borderRadius: 8,
+                  background: "transparent",
+                  cursor: "pointer",
+                }}
+              >
+                Dashboard
+              </button>
+            </div>
+          </div>
           <p style={styles.subtitle}>
             Describe a fix or feature, and I'll create a PR for you
           </p>
@@ -348,25 +446,17 @@ export default function App() {
                 <span
                   style={{
                     ...styles.statusBadge,
-                    ...(state.githubConnected
-                      ? styles.connectedBadge
-                      : styles.disconnectedBadge),
+                    ...(state.githubConnected ? styles.connectedBadge : styles.disconnectedBadge),
                   }}
                 >
-                  {state.githubConnected
-                    ? `✓ Connected as ${displayUsername}`
-                    : "○ Not Connected"}
+                  {state.githubConnected ? `✓ Connected as ${displayUsername}` : "○ Not Connected"}
                 </span>
               </div>
             </div>
             {state.githubConnected && (
               <button
                 onClick={handleDisconnect}
-                style={{
-                  ...styles.button,
-                  ...styles.secondaryButton,
-                  marginLeft: 0,
-                }}
+                style={{ ...styles.button, ...styles.secondaryButton, marginLeft: 0 }}
               >
                 Disconnect
               </button>
@@ -392,19 +482,15 @@ export default function App() {
                   rel="noopener noreferrer"
                   style={styles.link}
                 >
-                  GitHub Settings → Personal Access Tokens
+                  GitHub Settings
                 </a>{" "}
                 with <code>repo</code> scope
               </p>
-
               {connectionError && (
                 <div style={{ ...styles.errorBox, marginBottom: "1rem" }}>
-                  <p style={{ margin: 0, color: "#fff" }}>
-                    {connectionError}
-                  </p>
+                  <p style={{ margin: 0, color: "#fff" }}>{connectionError}</p>
                 </div>
               )}
-
               <button
                 onClick={handleConnectGitHub}
                 style={{
@@ -415,13 +501,7 @@ export default function App() {
                 disabled={isConnecting}
               >
                 {isConnecting ? (
-                  <span
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.5rem",
-                    }}
-                  >
+                  <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                     <span style={styles.spinner} />
                     Connecting...
                   </span>
@@ -447,18 +527,16 @@ export default function App() {
                 disabled={isLoading}
               />
             </div>
-
             <div>
               <label style={styles.label}>Describe the Fix/Feature</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g., Add a dark mode toggle to the settings page. It should save the preference to localStorage and apply the theme immediately."
+                placeholder="e.g., Add a dark mode toggle to the settings page."
                 style={styles.textarea}
                 disabled={isLoading}
               />
             </div>
-
             <div>
               <label style={styles.label}>Branch Name (optional)</label>
               <input
@@ -470,7 +548,6 @@ export default function App() {
                 disabled={isLoading}
               />
             </div>
-
             <div
               style={{
                 display: "flex",
@@ -480,15 +557,7 @@ export default function App() {
                 flexWrap: "wrap",
               }}
             >
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.5rem",
-                  cursor: "pointer",
-                  color: "#fff",
-                }}
-              >
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", color: "#fff" }}>
                 <input
                   type="checkbox"
                   checked={useReAct}
@@ -503,97 +572,55 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleReset}
-                  style={{
-                    ...styles.button,
-                    ...styles.secondaryButton,
-                    marginLeft: 0,
-                  }}
+                  style={{ ...styles.button, ...styles.secondaryButton, marginLeft: 0 }}
                   disabled={isLoading}
                 >
                   Reset
                 </button>
                 <button
                   type="submit"
-                style={{
-                  ...styles.button,
-                  ...styles.primaryButton,
-                  ...(isLoading || !state.githubConnected
-                    ? styles.disabledButton
-                    : {}),
-                }}
-                disabled={isLoading || !state.githubConnected}
-              >
-                {isSubmitting ? (
-                  <span
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.5rem",
-                    }}
-                  >
-                    <span style={styles.spinner} />
-                    {useReAct ? "ReAct reasoning..." : "Processing..."}
-                  </span>
-                ) : (
-                  useReAct ? "Create PR (ReAct)" : "Create PR"
-                )}
-              </button>
+                  style={{
+                    ...styles.button,
+                    ...styles.primaryButton,
+                    ...(isLoading || !state.githubConnected ? styles.disabledButton : {}),
+                  }}
+                  disabled={isLoading || !state.githubConnected}
+                >
+                  {isSubmitting ? (
+                    <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span style={styles.spinner} />
+                      {useReAct ? "ReAct reasoning..." : "Processing..."}
+                    </span>
+                  ) : useReAct ? (
+                    "Create PR (ReAct)"
+                  ) : (
+                    "Create PR"
+                  )}
+                </button>
               </div>
             </div>
           </form>
         </div>
 
-        {/* Execution plan (structured steps) — only while running, hide when result exists */}
+        {/* Execution plan */}
         {state.plan && state.plan.steps.length > 0 && !state.result && (
           <div style={{ ...styles.card, ...styles.planCard }}>
-            <h3 style={{ marginTop: 0, marginBottom: "0.5rem" }}>
-              Execution plan
-            </h3>
-            <p
-              style={{
-                margin: "0 0 1rem 0",
-                fontSize: "0.875rem",
-                color: "#888",
-              }}
-            >
+            <h3 style={{ marginTop: 0, marginBottom: "0.5rem" }}>Execution plan</h3>
+            <p style={{ margin: "0 0 1rem 0", fontSize: "0.875rem", color: "#888" }}>
               Step {state.plan.currentStepIndex + 1} of {state.plan.steps.length}
             </p>
             <ul style={styles.stepList}>
-              {state.plan.steps.map((step, idx) => {
+              {state.plan.steps.map((step) => {
                 const icon =
-                  step.status === "completed"
-                    ? "✓"
-                    : step.status === "running"
-                      ? "●"
-                      : step.status === "error"
-                        ? "✗"
-                        : "○";
+                  step.status === "completed" ? "✓" : step.status === "running" ? "●" : step.status === "error" ? "✗" : "○";
                 const color =
-                  step.status === "completed"
-                    ? "#fff"
-                    : step.status === "running"
-                      ? "#fff"
-                      : step.status === "error"
-                        ? "#fff"
-                        : "#888";
+                  step.status === "completed" ? "#fff" : step.status === "running" ? "#fff" : step.status === "error" ? "#fff" : "#888";
                 return (
                   <li key={step.id} style={styles.stepItem}>
                     <span style={{ ...styles.stepIcon, color }}>{icon}</span>
-                    <span
-                      style={{
-                        color:
-                          step.status === "pending"
-                            ? "#888"
-                            : "#fff",
-                      }}
-                    >
-                      {step.label}
-                    </span>
+                    <span style={{ color: step.status === "pending" ? "#888" : "#fff" }}>{step.label}</span>
                     {step.error && (
-                      <span style={{ color: "#fff", fontSize: "0.8rem", opacity: 0.9 }}>
-                        {" "}
-                        — {step.error}
-                      </span>
+                      <span style={{ color: "#fff", fontSize: "0.8rem", opacity: 0.9 }}> — {step.error}</span>
                     )}
                   </li>
                 );
@@ -602,7 +629,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Progress — only while running, hide when result exists so old runs don't linger */}
+        {/* Progress */}
         {state.progressMessages.length > 0 && !state.result && (
           <div style={styles.card}>
             <h3 style={{ marginTop: 0, marginBottom: "1rem" }}>Progress</h3>
@@ -622,26 +649,13 @@ export default function App() {
           <div style={styles.card}>
             {state.result.success ? (
               <div style={styles.successBox}>
-                <h3
-                  style={{
-                    marginTop: 0,
-                    marginBottom: "0.5rem",
-                    color: "#fff",
-                  }}
-                >
-                  ✓ PR Created Successfully!
-                </h3>
+                <h3 style={{ marginTop: 0, marginBottom: "0.5rem", color: "#fff" }}>✓ PR Created Successfully!</h3>
                 <p style={{ margin: 0 }}>
                   Branch: <code>{state.result.branchName}</code>
                 </p>
                 {state.result.prUrl && (
                   <p style={{ margin: "0.5rem 0 0 0" }}>
-                    <a
-                      href={state.result.prUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={styles.link}
-                    >
+                    <a href={state.result.prUrl} target="_blank" rel="noopener noreferrer" style={styles.link}>
                       View Pull Request →
                     </a>
                   </p>
@@ -649,47 +663,21 @@ export default function App() {
               </div>
             ) : (
               <div style={styles.errorBox}>
-                <h3
-                  style={{
-                    marginTop: 0,
-                    marginBottom: "0.5rem",
-                    color: "#fff",
-                  }}
-                >
-                  ✗ Error
-                </h3>
+                <h3 style={{ marginTop: 0, marginBottom: "0.5rem", color: "#fff" }}>✗ Error</h3>
                 <p style={{ margin: 0 }}>{state.result.error}</p>
               </div>
             )}
           </div>
         )}
 
-        {/* Footer */}
-        <footer
-          style={{
-            textAlign: "center",
-            marginTop: "2rem",
-            color: "#888",
-            fontSize: "0.875rem",
-          }}
-        >
+        <footer style={{ textAlign: "center", marginTop: "2rem", color: "#888", fontSize: "0.875rem" }}>
           <p>
             Built with{" "}
-            <a
-              href="https://developers.cloudflare.com/agents/"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={styles.link}
-            >
+            <a href="https://developers.cloudflare.com/agents/" target="_blank" rel="noopener noreferrer" style={styles.link}>
               Cloudflare Agents SDK
             </a>{" "}
             +{" "}
-            <a
-              href="https://developers.cloudflare.com/workers-ai/"
-              target="_blank"
-              rel="noopener noreferrer"
-              style={styles.link}
-            >
+            <a href="https://developers.cloudflare.com/workers-ai/" target="_blank" rel="noopener noreferrer" style={styles.link}>
               Workers AI
             </a>
           </p>
