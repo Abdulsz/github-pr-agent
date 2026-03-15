@@ -4,7 +4,7 @@ An AI-powered platform built on Cloudflare that combines two capabilities:
 
 1. **GitHub PR Agent** — Describe a fix or feature in plain English and the agent creates a pull request for you
 2. **Feedback Service** — A full-stack feedback collection system with an embeddable widget, AI-powered classification, a dashboard for managing submissions, and user authentication.
-3. https://github-pr-agent.zakariatimalma.workers.dev/auth
+3. [Dashboard](https://github-pr-agent.zakariatimalma.workers.dev/projects)
 
 ### Built with
 
