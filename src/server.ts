@@ -880,26 +880,21 @@ export default {
       if (feedbackResponse) return feedbackResponse;
     }
 
-    // Serve embed.js from assets (the public/ dir gets bundled into dist/)
-    if (url.pathname === "/embed.js") {
-      const assetUrl = new URL("/embed.js", request.url);
-      const assetRequest = new Request(assetUrl.toString(), request);
-      const assetResponse = await env.ASSETS.fetch(assetRequest);
-      if (assetResponse.ok) {
-        return new Response(assetResponse.body, {
-          headers: {
-            ...Object.fromEntries(assetResponse.headers.entries()),
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "public, max-age=3600",
-          },
-        });
-      }
-    }
-
     // Route agent requests (WebSocket / Durable Objects)
-    return (
-      (await routeAgentRequest(request, env)) ??
-      new Response("Not found", { status: 404 })
-    );
+    const agentResponse = await routeAgentRequest(request, env);
+    if (agentResponse) return agentResponse;
+
+    // Static assets + SPA fallback (wrangler assets.not_found_handling: single-page-application)
+    let assetResponse = await env.ASSETS.fetch(request);
+    if (url.pathname === "/embed.js" && assetResponse.ok) {
+      assetResponse = new Response(assetResponse.body, {
+        headers: {
+          ...Object.fromEntries(assetResponse.headers.entries()),
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600",
+        },
+      });
+    }
+    return assetResponse;
   },
 };

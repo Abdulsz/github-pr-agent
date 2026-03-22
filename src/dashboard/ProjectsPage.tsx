@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { DashboardShell } from "./DashboardShell";
 
 interface Project {
   id: string;
@@ -18,9 +19,11 @@ interface ProjectsPageProps {
   token: string;
   onLogout: () => void;
   onSelectProject: (projectId: string) => void;
+  onHome: () => void;
+  onOpenAgent: () => void;
 }
 
-export function ProjectsPage({ token, onLogout, onSelectProject }: ProjectsPageProps) {
+export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenAgent }: ProjectsPageProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -116,29 +119,32 @@ export function ProjectsPage({ token, onLogout, onSelectProject }: ProjectsPageP
   })();
 
   return (
-    <div style={styles.container}>
+    <DashboardShell
+      active="projects"
+      userLabel={user.name || user.email || "Account"}
+      userSub={user.email}
+      onLogout={onLogout}
+      onHome={onHome}
+      onProjects={() => {}}
+      onAgent={onOpenAgent}
+    >
       <main style={styles.main}>
         <header style={styles.header}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <h1 style={styles.title}>Projects</h1>
-              <p style={styles.subtitle}>
-                {user.name || user.email || "Your projects"}
-              </p>
-            </div>
-            <button onClick={onLogout} style={styles.logoutBtn}>
-              Sign Out
-            </button>
+          <div>
+            <h1 style={styles.title}>Projects</h1>
+            <p style={styles.subtitle}>
+              {user.name || user.email || "Your projects"}
+            </p>
           </div>
         </header>
 
         {/* Newly created project key display */}
         {createdKey && (
           <div style={styles.successCard}>
-            <h3 style={{ margin: "0 0 0.75rem 0", color: "#fff" }}>
+            <h3 style={{ margin: "0 0 0.75rem 0", color: "#14532d" }}>
               Project "{createdKey.name}" created
             </h3>
-            <p style={{ margin: "0 0 1rem 0", color: "#aaa", fontSize: "0.9rem" }}>
+            <p style={{ margin: "0 0 1rem 0", color: "#3f6212", fontSize: "0.9rem" }}>
               Save these credentials -- the API key won't be shown in full again.
             </p>
 
@@ -280,11 +286,11 @@ export function ProjectsPage({ token, onLogout, onSelectProject }: ProjectsPageP
         {/* Project list */}
         {loading ? (
           <div style={styles.card}>
-            <p style={{ margin: 0, color: "#888" }}>Loading projects...</p>
+            <p style={{ margin: 0, color: "#5c6570" }}>Loading projects...</p>
           </div>
         ) : projects.length === 0 && !showCreate ? (
           <div style={styles.card}>
-            <p style={{ margin: 0, color: "#888" }}>
+            <p style={{ margin: 0, color: "#5c6570" }}>
               No projects yet. Create one to get started.
             </p>
           </div>
@@ -296,7 +302,7 @@ export function ProjectsPage({ token, onLogout, onSelectProject }: ProjectsPageP
                   <div>
                     <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 600 }}>{p.name}</h3>
                     {p.description && (
-                      <p style={{ margin: "4px 0 0 0", color: "#888", fontSize: "0.9rem" }}>
+                      <p style={{ margin: "4px 0 0 0", color: "#5c6570", fontSize: "0.9rem" }}>
                         {p.description}
                       </p>
                     )}
@@ -356,21 +362,16 @@ export function ProjectsPage({ token, onLogout, onSelectProject }: ProjectsPageP
           </div>
         )}
       </main>
-    </div>
+    </DashboardShell>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    minHeight: "100vh",
-    background: "#000",
-    color: "#fff",
-    fontFamily: '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif',
-  },
   main: {
     maxWidth: 800,
     margin: "0 auto",
     padding: "2rem",
+    fontFamily: '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif',
   },
   header: {
     marginBottom: "2rem",
@@ -378,55 +379,44 @@ const styles: Record<string, React.CSSProperties> = {
   title: {
     fontSize: "2rem",
     fontWeight: 700,
-    color: "#fff",
+    color: "#262a41",
     margin: 0,
     letterSpacing: "-0.02em",
   },
   subtitle: {
-    color: "#888",
+    color: "#5c6570",
     fontSize: "1rem",
     marginTop: "0.25rem",
   },
-  logoutBtn: {
-    background: "transparent",
-    border: "1px solid rgba(255,255,255,0.15)",
-    color: "#888",
-    padding: "6px 14px",
-    borderRadius: 8,
-    cursor: "pointer",
-    fontSize: "0.85rem",
-    fontWeight: 500,
-  },
   card: {
-    background: "rgba(255,255,255,0.06)",
-    backdropFilter: "blur(12px)",
+    background: "#fff",
     borderRadius: 16,
     padding: "1.5rem",
     marginBottom: "1rem",
-    border: "1px solid rgba(255,255,255,0.12)",
+    border: "1px solid #e8ecf2",
+    boxShadow: "0 1px 2px rgba(16,24,40,0.04)",
   },
   successCard: {
-    background: "rgba(255,255,255,0.06)",
-    backdropFilter: "blur(12px)",
+    background: "#f0fdf4",
     borderRadius: 16,
     padding: "1.5rem",
     marginBottom: "1.5rem",
-    border: "1px solid rgba(255,255,255,0.25)",
+    border: "1px solid #bbf7d0",
   },
   label: {
     display: "block",
     marginBottom: "0.5rem",
     fontWeight: 500,
-    color: "#fff",
+    color: "#262a41",
     fontSize: "0.9rem",
   },
   input: {
     width: "100%",
     padding: "0.75rem 1rem",
     borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.2)",
-    background: "rgba(255,255,255,0.06)",
-    color: "#fff",
+    border: "1px solid #d2dce8",
+    background: "#fff",
+    color: "#262a41",
     fontSize: "1rem",
     marginBottom: "0.75rem",
     outline: "none",
@@ -434,12 +424,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   helpText: {
     fontSize: "0.8rem",
-    color: "#888",
+    color: "#5c6570",
     marginTop: "-0.5rem",
     marginBottom: "1rem",
   },
   code: {
-    background: "rgba(255,255,255,0.1)",
+    background: "#f4f6fa",
     padding: "1px 5px",
     borderRadius: 4,
     fontSize: "0.85rem",
@@ -449,7 +439,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: "0.5rem",
     cursor: "pointer",
-    color: "#fff",
+    color: "#262a41",
     fontSize: "0.9rem",
     marginBottom: "0.5rem",
   },
@@ -463,13 +453,14 @@ const styles: Record<string, React.CSSProperties> = {
     transition: "border-color 0.2s, opacity 0.2s",
   },
   primaryButton: {
-    background: "#fff",
-    color: "#000",
-    borderColor: "#fff",
+    background: "#101010",
+    color: "#fff",
+    borderColor: "#101010",
   },
   secondaryButton: {
     background: "transparent",
-    color: "#fff",
+    color: "#262a41",
+    borderColor: "#d2dce8",
   },
   disabledButton: {
     opacity: 0.5,
@@ -507,20 +498,20 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 80,
   },
   credValue: {
-    background: "rgba(255,255,255,0.08)",
+    background: "#f4f6fa",
     padding: "4px 10px",
     borderRadius: 6,
     fontSize: "0.85rem",
-    color: "#fff",
+    color: "#262a41",
     flex: 1,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
   },
   copyBtn: {
-    background: "rgba(255,255,255,0.1)",
-    border: "1px solid rgba(255,255,255,0.2)",
-    color: "#fff",
+    background: "#fff",
+    border: "1px solid #d2dce8",
+    color: "#262a41",
     padding: "4px 12px",
     borderRadius: 6,
     cursor: "pointer",
@@ -540,11 +531,11 @@ const styles: Record<string, React.CSSProperties> = {
     minWidth: 70,
   },
   metaValue: {
-    background: "rgba(255,255,255,0.08)",
+    background: "#f4f6fa",
     padding: "2px 8px",
     borderRadius: 4,
     fontSize: "0.8rem",
-    color: "#aaa",
+    color: "#404852",
   },
   autoPRBadge: {
     background: "rgba(59,130,246,0.2)",

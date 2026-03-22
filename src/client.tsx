@@ -4,8 +4,9 @@ import type { AgentState, PRRequest } from "./types";
 import { AuthPage } from "./auth/AuthPage";
 import { ProjectsPage } from "./dashboard/ProjectsPage";
 import { Dashboard } from "./dashboard/Dashboard";
+import { FeedbackLanding } from "./landing/FeedbackLanding";
 
-type Page = "auth" | "projects" | "dashboard" | "pr-agent";
+type Page = "landing" | "auth" | "projects" | "dashboard" | "pr-agent";
 
 // Styles -- minimal black UI, white font, subtle borders
 const styles = {
@@ -210,6 +211,14 @@ function getInitialPage(): { page: Page; projectId?: string } {
   const params = new URLSearchParams(window.location.search);
   const token = localStorage.getItem("authToken");
 
+  if (path === "/auth") {
+    return { page: "auth" };
+  }
+
+  if (path === "/agent" || path.startsWith("/agent/")) {
+    return { page: "pr-agent" };
+  }
+
   if (path === "/dashboard" || path.startsWith("/dashboard")) {
     if (!token) return { page: "auth" };
     const pid = params.get("projectId");
@@ -221,12 +230,8 @@ function getInitialPage(): { page: Page; projectId?: string } {
     return token ? { page: "projects" } : { page: "auth" };
   }
 
-  if (path === "/auth") {
-    return { page: "auth" };
-  }
-
-  // Root path: show PR agent (the original page)
-  return { page: "pr-agent" };
+  // Root and unknown paths: product landing
+  return { page: "landing" };
 }
 
 export default function App() {
@@ -269,8 +274,17 @@ export default function App() {
     navigate("auth");
   }
 
+  if (page === "landing") {
+    return (
+      <FeedbackLanding
+        onSignIn={() => navigate(authToken ? "projects" : "auth")}
+        onOpenAgent={() => navigate("pr-agent")}
+      />
+    );
+  }
+
   if (page === "auth") {
-    return <AuthPage onAuth={handleAuth} />;
+    return <AuthPage onAuth={handleAuth} onBackHome={() => navigate("landing")} />;
   }
 
   if (page === "projects" && authToken) {
@@ -279,6 +293,8 @@ export default function App() {
         token={authToken}
         onLogout={handleLogout}
         onSelectProject={(pid) => navigate("dashboard", pid)}
+        onHome={() => navigate("landing")}
+        onOpenAgent={() => navigate("pr-agent")}
       />
     );
   }
@@ -290,6 +306,8 @@ export default function App() {
         token={authToken}
         onBack={() => navigate("projects")}
         onLogout={handleLogout}
+        onHome={() => navigate("landing")}
+        onOpenAgent={() => navigate("pr-agent")}
       />
     );
   }
@@ -299,12 +317,11 @@ export default function App() {
     return <AuthPage onAuth={handleAuth} />;
   }
 
-  // Default: PR Agent page
+  // PR Agent at /agent
   return <PRAgentPage onNavigate={navigate} />;
 }
 
-// Original PR Agent page extracted as a component
-function PRAgentPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
+function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: string) => void }) {
   const [repoUrl, setRepoUrl] = useState("");
   const [description, setDescription] = useState("");
   const [branchName, setBranchName] = useState("");
@@ -405,14 +422,14 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
       <style>{spinnerKeyframes}</style>
       <main style={styles.main}>
         <header style={styles.header}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
             <h1 style={styles.title}>GitHub PR Agent</h1>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
               <button
-                onClick={() => onNavigate("projects")}
+                type="button"
+                onClick={() => onNavigate("landing")}
                 style={{
                   color: "#888",
-                  textDecoration: "none",
                   fontSize: "0.9rem",
                   border: "1px solid rgba(255,255,255,0.15)",
                   padding: "6px 14px",
@@ -421,7 +438,25 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
                   cursor: "pointer",
                 }}
               >
-                Dashboard
+                Home
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const t = localStorage.getItem("authToken");
+                  onNavigate(t ? "projects" : "auth");
+                }}
+                style={{
+                  color: "#888",
+                  fontSize: "0.9rem",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  padding: "6px 14px",
+                  borderRadius: 8,
+                  background: "transparent",
+                  cursor: "pointer",
+                }}
+              >
+                Feedback
               </button>
             </div>
           </div>

@@ -2,9 +2,10 @@ import { useState } from "react";
 
 interface AuthPageProps {
   onAuth: (token: string, user: { id: string; email: string; name?: string }) => void;
+  onBackHome?: () => void;
 }
 
-export function AuthPage({ onAuth }: AuthPageProps) {
+export function AuthPage({ onAuth, onBackHome }: AuthPageProps) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -53,9 +54,14 @@ export function AuthPage({ onAuth }: AuthPageProps) {
     <div style={styles.container}>
       <main style={styles.main}>
         <header style={styles.header}>
-          <h1 style={styles.title}>Feedback Service</h1>
+          {onBackHome && (
+            <button type="button" onClick={onBackHome} style={styles.backLink}>
+              ← DevFeedback
+            </button>
+          )}
+          <h1 style={styles.title}>Sign in</h1>
           <p style={styles.subtitle}>
-            {mode === "login" ? "Sign in to your account" : "Create a new account"}
+            {mode === "login" ? "Dashboard access" : "Create an account"}
           </p>
         </header>
 
@@ -167,6 +173,17 @@ const styles: Record<string, React.CSSProperties> = {
   header: {
     textAlign: "center",
     marginBottom: "2rem",
+  },
+  backLink: {
+    display: "block",
+    marginBottom: "1.25rem",
+    background: "none",
+    border: "none",
+    color: "#888",
+    fontSize: "0.9rem",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    width: "100%",
   },
   title: {
     fontSize: "2rem",

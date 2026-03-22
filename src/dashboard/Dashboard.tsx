@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import type { Feedback } from "../types";
+import { DashboardShell } from "./DashboardShell";
 
 type FilterType = "all" | "technical" | "non-technical";
 const FILTER_TABS: FilterType[] = ["all", "technical", "non-technical"];
@@ -10,9 +11,11 @@ interface DashboardProps {
   token: string;
   onBack: () => void;
   onLogout: () => void;
+  onHome: () => void;
+  onOpenAgent: () => void;
 }
 
-export function Dashboard({ projectId, token, onBack, onLogout }: DashboardProps) {
+export function Dashboard({ projectId, token, onBack, onLogout, onHome, onOpenAgent }: DashboardProps) {
   const [feedbackList, setFeedbackList] = useState<Feedback[]>([]);
   const [filter, setFilter] = useState<FilterType>("all");
   const [loading, setLoading] = useState(false);
@@ -74,22 +77,35 @@ export function Dashboard({ projectId, token, onBack, onLogout }: DashboardProps
     }
   }
 
+  const user = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("authUser") || "{}") as { email?: string; name?: string };
+    } catch {
+      return {};
+    }
+  })();
+
   return (
-    <div style={styles.container}>
+    <DashboardShell
+      active="dashboard"
+      userLabel={user.name || user.email || "Account"}
+      userSub={user.email}
+      onLogout={onLogout}
+      onHome={onHome}
+      onProjects={onBack}
+      onAgent={onOpenAgent}
+    >
       <main style={styles.main}>
         <header style={styles.header}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <button onClick={onBack} style={styles.backBtn}>
-                {"<- Projects"}
-              </button>
-              <h1 style={styles.title}>Feedback</h1>
-            </div>
-            <button onClick={onLogout} style={styles.logoutBtn}>
-              Sign Out
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <button onClick={onBack} style={styles.backBtn}>
+              ← Projects
             </button>
+            <h1 style={styles.title}>Inbox</h1>
           </div>
-          <p style={styles.subtitle}>Project: {projectId.slice(0, 8)}...</p>
+          <p style={styles.subtitle}>
+            Project {projectId.slice(0, 8)}… · Filter, triage, and update status.
+          </p>
         </header>
 
         {/* Filter tabs */}
@@ -113,11 +129,11 @@ export function Dashboard({ projectId, token, onBack, onLogout }: DashboardProps
         {/* Feedback list */}
         {loading ? (
           <div style={styles.card}>
-            <p style={{ margin: 0, color: "#888" }}>Loading...</p>
+            <p style={{ margin: 0, color: "#5c6570" }}>Loading...</p>
           </div>
         ) : feedbackList.length === 0 ? (
           <div style={styles.card}>
-            <p style={{ margin: 0, color: "#888" }}>
+            <p style={{ margin: 0, color: "#5c6570" }}>
               No feedback yet. Integrate the widget or use the API to submit feedback.
             </p>
           </div>
@@ -152,7 +168,7 @@ export function Dashboard({ projectId, token, onBack, onLogout }: DashboardProps
                   <span style={styles.categoryBadge}>{fb.category}</span>
                 )}
 
-                <p style={{ margin: "8px 0", color: "#aaa", fontSize: "0.9rem" }}>
+                <p style={{ margin: "8px 0", color: "#404852", fontSize: "0.9rem" }}>
                   {fb.description}
                 </p>
 
@@ -197,21 +213,16 @@ export function Dashboard({ projectId, token, onBack, onLogout }: DashboardProps
           </div>
         )}
       </main>
-    </div>
+    </DashboardShell>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    minHeight: "100vh",
-    background: "#000",
-    color: "#fff",
-    fontFamily: '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif',
-  },
   main: {
     maxWidth: 900,
     margin: "0 auto",
     padding: "2rem",
+    fontFamily: '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif',
   },
   header: {
     marginBottom: "2rem",
@@ -219,56 +230,46 @@ const styles: Record<string, React.CSSProperties> = {
   title: {
     fontSize: "2rem",
     fontWeight: 700,
-    color: "#fff",
+    color: "#262a41",
     margin: 0,
     letterSpacing: "-0.02em",
   },
   subtitle: {
-    color: "#888",
+    color: "#5c6570",
     fontSize: "1rem",
     marginTop: "0.5rem",
   },
   backBtn: {
     background: "none",
     border: "none",
-    color: "#888",
+    color: "#5c6570",
     cursor: "pointer",
     fontSize: "0.9rem",
     padding: 0,
     whiteSpace: "nowrap" as const,
   },
-  logoutBtn: {
-    background: "transparent",
-    border: "1px solid rgba(255,255,255,0.15)",
-    color: "#888",
-    padding: "6px 14px",
-    borderRadius: 8,
-    cursor: "pointer",
-    fontSize: "0.85rem",
-    fontWeight: 500,
-  },
   card: {
-    background: "rgba(255,255,255,0.06)",
-    backdropFilter: "blur(12px)",
+    background: "#fff",
     borderRadius: 16,
     padding: "1.25rem",
     marginBottom: "1rem",
-    border: "1px solid rgba(255,255,255,0.12)",
+    border: "1px solid #e8ecf2",
+    boxShadow: "0 1px 2px rgba(16,24,40,0.04)",
   },
   filterBtn: {
     padding: "6px 14px",
     borderRadius: 8,
-    border: "1px solid rgba(255,255,255,0.15)",
-    background: "transparent",
-    color: "#aaa",
+    border: "1px solid #d2dce8",
+    background: "#fff",
+    color: "#5c6570",
     cursor: "pointer",
     fontSize: "0.85rem",
     fontWeight: 500,
   },
   filterBtnActive: {
-    background: "#fff",
-    color: "#000",
-    borderColor: "#fff",
+    background: "#101010",
+    color: "#fff",
+    borderColor: "#101010",
   },
   badge: {
     padding: "3px 8px",
@@ -291,8 +292,8 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 4,
     fontSize: 11,
     fontWeight: 500,
-    background: "rgba(255,255,255,0.08)",
-    color: "#aaa",
+    background: "#f4f6fa",
+    color: "#5c6570",
     textTransform: "uppercase" as const,
     letterSpacing: "0.05em",
   },
@@ -305,9 +306,9 @@ const styles: Record<string, React.CSSProperties> = {
   statusSelect: {
     padding: "4px 8px",
     borderRadius: 6,
-    border: "1px solid rgba(255,255,255,0.2)",
-    background: "rgba(255,255,255,0.06)",
-    color: "#fff",
+    border: "1px solid #d2dce8",
+    background: "#fff",
+    color: "#262a41",
     fontSize: 13,
     cursor: "pointer",
   },
