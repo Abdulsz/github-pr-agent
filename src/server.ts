@@ -252,7 +252,7 @@ export class GitHubPRAgent extends Agent<Env, AgentState> {
   }> {
     console.log("setGitHubToken called");
     try {
-      this.addProgress("Verifying GitHub token...");
+      this.addProgress("Verifying GitHub connection...");
 
       this.github = new GitHubAPI(token);
       const user = await this.github.getUser();
@@ -541,7 +541,7 @@ Output ONLY the JSON array. Start with [ end with ]`;
       this.setPlanStepRunning(step1);
       if (!this.ensureGitHubConnection()) {
         throw new Error(
-          "GitHub not connected. Please set your GitHub Personal Access Token first."
+          "GitHub not connected. Please sign in with GitHub first."
         );
       }
       this.setPlanStepCompleted(step1);
@@ -767,7 +767,7 @@ Output ONLY the JSON array. Start with [ end with ]`;
       if (!this.ensureGitHubConnection()) {
         return {
           success: false,
-          error: "GitHub not connected. Please set your GitHub Personal Access Token first.",
+          error: "GitHub not connected. Please sign in with GitHub first.",
         };
       }
 
