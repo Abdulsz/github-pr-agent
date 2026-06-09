@@ -87,20 +87,41 @@ npx wrangler d1 create feedback-db
 
 Update the `database_id` in `wrangler.jsonc` with the ID returned by the command.
 
-4. Create a GitHub OAuth App at [GitHub Developer Settings](https://github.com/settings/developers):
+4. Create a GitHub OAuth App at [GitHub Developer Settings](https://github.com/settings/developers) → **OAuth Apps** → **New OAuth App**:
 
    - **Application name:** GitHub PR Agent (or your app name)
-   - **Homepage URL:** Your deployed Worker URL (e.g. `https://github-pr-agent.<subdomain>.workers.dev`)
-   - **Authorization callback URL:** `https://github-pr-agent.<subdomain>.workers.dev/api/github/oauth/callback`
-   - For local development, also add: `http://localhost:8787/api/github/oauth/callback`
+   - **Homepage URL:** `http://localhost:5173` (for local dev) or your production URL
+   - **Authorization callback URL:** see below — GitHub only allows **one** callback URL per OAuth App
 
-5. Set environment variables in `.dev.vars` (local) or via `wrangler secret put` (production):
+   **Local development callback URL:**
+   ```
+   http://localhost:8787/api/github/oauth/callback
+   ```
+
+   **Production callback URL:**
+   ```
+   https://github-pr-agent.<subdomain>.workers.dev/api/github/oauth/callback
+   ```
+
+   Because OAuth Apps support only a single callback URL, pick one of these approaches:
+   - **Easiest for local dev:** set the callback to the localhost URL above while developing, then change it to your production URL before deploying
+   - **Recommended for both environments:** create two OAuth Apps (one for dev, one for prod) and use the matching client ID/secret in `.dev.vars` vs production secrets
+
+5. Set local environment variables — create a `.dev.vars` file in the **project root** (it is gitignored):
+
+```bash
+cp .dev.vars.example .dev.vars
+```
+
+Then edit `.dev.vars`:
 
 ```bash
 JWT_SECRET=your-secret-key
 GITHUB_CLIENT_ID=your-github-oauth-client-id
 GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
 ```
+
+For production, use `wrangler secret put GITHUB_CLIENT_ID` (and the same for `GITHUB_CLIENT_SECRET` and `JWT_SECRET`).
 
 ### Development
 

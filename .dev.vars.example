@@ -1,0 +1,15 @@
+# Copy this file to `.dev.vars` in the project root for local development.
+# Wrangler loads `.dev.vars` automatically when you run `npm run dev`.
+#
+#   cp .dev.vars.example .dev.vars
+#
+# Then fill in your values below.
+
+JWT_SECRET=replace-with-a-long-random-string
+
+# From your GitHub OAuth App (Settings → Developer settings → OAuth Apps)
+GITHUB_CLIENT_ID=your-github-oauth-client-id
+GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
+
+# Optional
+# OPENAI_API_KEY=
