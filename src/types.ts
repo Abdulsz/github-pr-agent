@@ -8,6 +8,8 @@ export interface Env {
   JWT_SECRET: string;
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
+  /** Optional explicit OAuth callback URL (must match GitHub OAuth App settings exactly) */
+  GITHUB_OAUTH_CALLBACK_URL?: string;
   OPENAI_API_KEY?: string;
 }
 

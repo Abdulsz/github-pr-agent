@@ -98,14 +98,15 @@ Update the `database_id` in `wrangler.jsonc` with the ID returned by the command
    http://localhost:8787/api/github/oauth/callback
    ```
 
-   **Production callback URL:**
+   **Production callback URL** (for your deployed Worker):
    ```
-   https://github-pr-agent.<subdomain>.workers.dev/api/github/oauth/callback
+   https://github-pr-agent.zakariatimalma.workers.dev/api/github/oauth/callback
    ```
 
-   Because OAuth Apps support only a single callback URL, pick one of these approaches:
-   - **Easiest for local dev:** set the callback to the localhost URL above while developing, then change it to your production URL before deploying
-   - **Recommended for both environments:** create two OAuth Apps (one for dev, one for prod) and use the matching client ID/secret in `.dev.vars` vs production secrets
+   **Important:** The callback URL in GitHub must match where you are actually testing:
+   - Testing on **production** (`*.workers.dev`) → use the production callback URL above
+   - Testing **locally** (`npm run dev`) → use the localhost callback URL above
+   - You cannot use both with a single OAuth App — create two OAuth Apps, or swap the callback URL when switching environments
 
 5. Set local environment variables — create a `.dev.vars` file in the **project root** (it is gitignored):
 

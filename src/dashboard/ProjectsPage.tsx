@@ -93,7 +93,10 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
       const res = await fetch("/api/github/oauth/authorize", {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({ returnTo: "/projects" }),
+        body: JSON.stringify({
+          returnTo: "/projects",
+          frontendOrigin: window.location.origin,
+        }),
       });
       const data = (await res.json()) as { success: boolean; data?: { url: string }; error?: string };
       if (data.success && data.data?.url) {

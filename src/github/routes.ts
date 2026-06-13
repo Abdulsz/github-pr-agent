@@ -70,12 +70,14 @@ async function handleAuthorize(
     url.searchParams.get("context") === "dashboard" ? "dashboard" : "agent";
   let returnTo = url.searchParams.get("returnTo") || (context === "dashboard" ? "/projects" : "/agent");
   let agentName = url.searchParams.get("agentName") || undefined;
+  let frontendOrigin = url.searchParams.get("frontendOrigin") || undefined;
 
   if (request.method === "POST") {
     context = "dashboard" as const;
     try {
-      const body = (await request.json()) as { returnTo?: string };
+      const body = (await request.json()) as { returnTo?: string; frontendOrigin?: string };
       if (body.returnTo) returnTo = body.returnTo;
+      if (body.frontendOrigin) frontendOrigin = body.frontendOrigin;
     } catch {
       // Use defaults when body is empty
     }
@@ -101,11 +103,12 @@ async function handleAuthorize(
       agentName,
       userId,
       returnTo,
+      frontendOrigin,
     },
     env.JWT_SECRET
   );
 
-  const redirectUri = getOAuthRedirectUri(request);
+  const redirectUri = getOAuthRedirectUri(request, env);
   const authorizeUrl = buildGitHubAuthorizeUrl(env.GITHUB_CLIENT_ID, redirectUri, state);
 
   if (context === "dashboard" && request.method === "POST") {
@@ -125,34 +128,42 @@ async function handleCallback(
   const stateParam = url.searchParams.get("state");
   const githubError = url.searchParams.get("error_description") || url.searchParams.get("error");
 
+  const redirect = (
+    returnTo: string,
+    status: "connected" | "error",
+    message?: string,
+    frontendOrigin?: string
+  ) => redirectWithStatus(returnTo, status, request.url, message, frontendOrigin);
+
   if (githubError) {
-    return redirectWithStatus("/agent", "error", githubError);
+    return redirect("/agent", "error", githubError);
   }
 
   if (!code || !stateParam) {
-    return redirectWithStatus("/agent", "error", "Missing OAuth code or state");
+    return redirect("/agent", "error", "Missing OAuth code or state");
   }
 
   const state = await verifyOAuthState(stateParam, env.JWT_SECRET);
   if (!state) {
-    return redirectWithStatus("/agent", "error", "Invalid or expired OAuth state");
+    return redirect("/agent", "error", "Invalid or expired OAuth state");
   }
 
   try {
-    const redirectUri = getOAuthRedirectUri(request);
+    const redirectUri = getOAuthRedirectUri(request, env);
     const tokenData = await exchangeCodeForToken(code, redirectUri, env);
     const githubUser = await fetchGitHubUser(tokenData.access_token);
 
     if (state.context === "agent" && state.agentName) {
       const result = await connectAgentWithToken(env, state.agentName, tokenData.access_token);
       if (!result.connected) {
-        return redirectWithStatus(
+        return redirect(
           state.returnTo,
           "error",
-          result.error || "Failed to connect agent to GitHub"
+          result.error || "Failed to connect agent to GitHub",
+          state.frontendOrigin
         );
       }
-      return redirectWithStatus(state.returnTo, "connected");
+      return redirect(state.returnTo, "connected", undefined, state.frontendOrigin);
     }
 
     if (state.context === "dashboard" && state.userId) {
@@ -167,13 +178,13 @@ async function handleCallback(
         githubUsername: githubUser.login,
         scopes: tokenData.scope,
       });
-      return redirectWithStatus(state.returnTo, "connected");
+      return redirect(state.returnTo, "connected", undefined, state.frontendOrigin);
     }
 
-    return redirectWithStatus(state.returnTo, "error", "Invalid OAuth context");
+    return redirect(state.returnTo, "error", "Invalid OAuth context", state.frontendOrigin);
   } catch (error) {
     const message = error instanceof Error ? error.message : "GitHub OAuth failed";
-    return redirectWithStatus(state.returnTo, "error", message);
+    return redirect(state.returnTo, "error", message, state.frontendOrigin);
   }
 }
 

@@ -11,5 +11,9 @@ JWT_SECRET=replace-with-a-long-random-string
 GITHUB_CLIENT_ID=your-github-oauth-client-id
 GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
 
+# Must match the Authorization callback URL in your GitHub OAuth App exactly.
+# For local dev with `npm run dev`:
+GITHUB_OAUTH_CALLBACK_URL=http://localhost:8787/api/github/oauth/callback
+
 # Optional
 # OPENAI_API_KEY=

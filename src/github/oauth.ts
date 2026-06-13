@@ -13,6 +13,8 @@ export interface GitHubOAuthState {
   agentName?: string;
   userId?: string;
   returnTo: string;
+  /** Browser origin to redirect back to after OAuth (e.g. localhost:5173 in dev) */
+  frontendOrigin?: string;
   exp: number;
 }
 
@@ -59,9 +61,41 @@ async function hmacSign(payload: string, secret: string): Promise<string> {
     .replace(/=+$/, "");
 }
 
-export function getOAuthRedirectUri(request: Request): string {
-  const url = new URL(request.url);
-  return `${url.origin}/api/github/oauth/callback`;
+function getRequestOrigin(request: Request): string {
+  const forwardedHost = request.headers.get("X-Forwarded-Host");
+  const forwardedProto = request.headers.get("X-Forwarded-Proto");
+  if (forwardedHost) {
+    const proto = forwardedProto || "https";
+    return `${proto}://${forwardedHost}`;
+  }
+
+  const host = request.headers.get("Host");
+  if (host) {
+    const url = new URL(request.url);
+    return `${url.protocol}//${host}`;
+  }
+
+  return new URL(request.url).origin;
+}
+
+/**
+ * Resolve the OAuth callback URL. Must match the Authorization callback URL
+ * registered in the GitHub OAuth App exactly.
+ */
+export function getOAuthRedirectUri(request: Request, env?: { GITHUB_OAUTH_CALLBACK_URL?: string }): string {
+  if (env?.GITHUB_OAUTH_CALLBACK_URL) {
+    return env.GITHUB_OAUTH_CALLBACK_URL;
+  }
+
+  const origin = getRequestOrigin(request);
+  const parsed = new URL(origin);
+
+  // Vite dev UI runs on :5173 but OAuth callback is registered on wrangler :8787
+  if (parsed.hostname === "localhost" && parsed.port === "5173") {
+    return "http://localhost:8787/api/github/oauth/callback";
+  }
+
+  return `${origin}/api/github/oauth/callback`;
 }
 
 export async function createOAuthState(
@@ -181,13 +215,15 @@ export async function encryptGitHubAccessToken(
 export function redirectWithStatus(
   returnTo: string,
   status: "connected" | "error",
-  message?: string
+  requestUrl: string,
+  message?: string,
+  frontendOrigin?: string
 ): Response {
-  const url = new URL(returnTo, "https://placeholder.local");
+  const origin = frontendOrigin || new URL(requestUrl).origin;
+  const url = new URL(returnTo, origin);
   url.searchParams.set("github", status);
   if (message) url.searchParams.set("message", message);
-  const path = `${url.pathname}${url.search}`;
-  return Response.redirect(path, 302);
+  return Response.redirect(url.toString(), 302);
 }
 
 export async function connectAgentWithToken(

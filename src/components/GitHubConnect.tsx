@@ -54,6 +54,7 @@ export function buildAgentOAuthUrl(agentName: string, returnTo = "/agent"): stri
     context: "agent",
     agentName,
     returnTo,
+    frontendOrigin: window.location.origin,
   });
   return `/api/github/oauth/authorize?${params.toString()}`;
 }
