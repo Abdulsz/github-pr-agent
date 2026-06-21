@@ -19,7 +19,7 @@ An AI-powered platform built on Cloudflare that combines two capabilities:
 
 ### PR Agent
 
-- GitHub Personal Access Token authentication
+- GitHub OAuth sign-in (no manual tokens required)
 - Natural language input for describing fixes/features
 - AI-powered code generation and analysis
 - Automatic branch creation and PR submission
@@ -63,7 +63,7 @@ An AI-powered platform built on Cloudflare that combines two capabilities:
 - Node.js 20.x or later
 - A Cloudflare account
 - Wrangler CLI (included in dependencies)
-- A GitHub Personal Access Token with `repo` scope (for the PR Agent)
+- A GitHub OAuth App (for user sign-in and repo access)
 
 ### Installation
 
@@ -86,6 +86,43 @@ npx wrangler d1 create feedback-db
 ```
 
 Update the `database_id` in `wrangler.jsonc` with the ID returned by the command.
+
+4. Create a GitHub OAuth App at [GitHub Developer Settings](https://github.com/settings/developers) → **OAuth Apps** → **New OAuth App**:
+
+   - **Application name:** GitHub PR Agent (or your app name)
+   - **Homepage URL:** `http://localhost:5173` (for local dev) or your production URL
+   - **Authorization callback URL:** see below — GitHub only allows **one** callback URL per OAuth App
+
+   **Local development callback URL:**
+   ```
+   http://localhost:8787/api/github/oauth/callback
+   ```
+
+   **Production callback URL** (for your deployed Worker):
+   ```
+   https://github-pr-agent.zakariatimalma.workers.dev/api/github/oauth/callback
+   ```
+
+   **Important:** The callback URL in GitHub must match where you are actually testing:
+   - Testing on **production** (`*.workers.dev`) → use the production callback URL above
+   - Testing **locally** (`npm run dev`) → use the localhost callback URL above
+   - You cannot use both with a single OAuth App — create two OAuth Apps, or swap the callback URL when switching environments
+
+5. Set local environment variables — create a `.dev.vars` file in the **project root** (it is gitignored):
+
+```bash
+cp .dev.vars.example .dev.vars
+```
+
+Then edit `.dev.vars`:
+
+```bash
+JWT_SECRET=your-secret-key
+GITHUB_CLIENT_ID=your-github-oauth-client-id
+GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
+```
+
+For production, use `wrangler secret put GITHUB_CLIENT_ID` (and the same for `GITHUB_CLIENT_SECRET` and `JWT_SECRET`).
 
 ### Development
 
@@ -113,19 +150,20 @@ npm run deploy
 
 ### PR Agent
 
-1. Open the app at the root URL (`/`)
-2. Create a GitHub Personal Access Token at [GitHub Settings](https://github.com/settings/tokens/new?scopes=repo) with `repo` scope
-3. Enter your token and click "Connect to GitHub"
-4. Provide a repository URL and describe the changes you want
-5. Click "Create PR" and watch the real-time progress
-6. Once complete, follow the link to view your pull request
+1. Open the PR Agent at `/agent`
+2. Click **Sign in with GitHub** and authorize access to your repositories
+3. Provide a repository URL and describe the changes you want
+4. Click "Create PR" and watch the real-time progress
+5. Once complete, follow the link to view your pull request
 
 ### Feedback Dashboard
 
 1. Navigate to `/auth` and register an account
-2. Create a project from the `/projects` page — you'll receive a `projectId` and `apiKey`
-3. Open the project dashboard to view, filter, and manage feedback submissions
-4. Embed the feedback widget on any website using the project credentials (see below)
+2. Connect your GitHub account from the `/projects` page
+3. Create a project — you'll receive a `projectId` and `apiKey`
+4. Optionally link a GitHub repo and enable auto-PR for technical feedback
+5. Open the project dashboard to view, filter, and manage feedback submissions
+6. Embed the feedback widget on any website using the project credentials (see below)
 
 ### Embedding the Feedback Widget
 
@@ -153,6 +191,11 @@ When the widget is served from the same origin as the API, `apiBaseUrl` can be o
 │   ├── main.tsx               # React entry point
 │   ├── types.ts               # Shared TypeScript types (Env, PR, Feedback)
 │   ├── react-agent.ts         # ReAct agent for autonomous PR creation
+│   ├── github/
+│   │   ├── oauth.ts           # GitHub OAuth helpers (authorize, token exchange)
+│   │   └── routes.ts          # /api/github/oauth/* route handlers
+│   ├── components/
+│   │   └── GitHubConnect.tsx  # Shared "Sign in with GitHub" button
 │   ├── auth/
 │   │   └── AuthPage.tsx       # Login / register UI
 │   ├── dashboard/
@@ -181,6 +224,16 @@ When the widget is served from the same origin as the API, `apiBaseUrl` can be o
 | POST | `/api/auth/register` | Create a new user account |
 | POST | `/api/auth/login` | Login and receive a JWT |
 | GET | `/api/auth/me` | Get current user info (requires JWT) |
+
+### GitHub OAuth Endpoints
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/api/github/oauth/authorize` | None (agent) | Start OAuth for PR Agent (requires `agentName` query param) |
+| POST | `/api/github/oauth/authorize` | JWT | Start OAuth for dashboard users, returns authorize URL |
+| GET | `/api/github/oauth/callback` | None | GitHub OAuth callback (handled by GitHub redirect) |
+| GET | `/api/github/oauth/status` | JWT | Check if the user has a connected GitHub account |
+| DELETE | `/api/github/oauth/disconnect` | JWT | Disconnect the user's GitHub account |
 
 ### Feedback Endpoints
 
@@ -219,7 +272,7 @@ Body:
 
 | Method | Description |
 |--------|-------------|
-| `setGitHubToken(token)` | Authenticate with GitHub using a Personal Access Token |
+| `setGitHubToken(token)` | Set GitHub access token (used internally after OAuth) |
 | `createPR(request)` | Create a pull request from a natural language request |
 | `createPRReAct(request)` | Create a PR using autonomous ReAct reasoning |
 | `reset()` | Reset agent state (preserves GitHub connection) |
@@ -242,7 +295,9 @@ Set these in `.dev.vars` for local development or via `wrangler secret put` for 
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `JWT_SECRET` | Yes | Secret key for signing authentication JWTs |
+| `JWT_SECRET` | Yes | Secret key for signing authentication JWTs and encrypting GitHub tokens |
+| `GITHUB_CLIENT_ID` | Yes | GitHub OAuth App client ID |
+| `GITHUB_CLIENT_SECRET` | Yes | GitHub OAuth App client secret |
 | `OPENAI_API_KEY` | No | Optional OpenAI key (Workers AI is used by default) |
 
 ## Limitations

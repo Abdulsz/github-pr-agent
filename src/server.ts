@@ -219,6 +219,69 @@ export class GitHubPRAgent extends Agent<Env, AgentState> {
     }
   }
 
+  // Handle direct HTTP calls to this agent instance.
+  // This supports internal Worker calls via `stub.fetch("https://agent/...")`.
+  async onRequest(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    if (request.method === "GET" && url.pathname === "/status") {
+      return json(await this.getStatus());
+    }
+
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    let body: { args?: unknown[] };
+    try {
+      body = (await request.json()) as { args?: unknown[] };
+    } catch {
+      return json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const args = Array.isArray(body.args) ? body.args : [];
+
+    if (url.pathname === "/setGitHubToken") {
+      const token = args[0];
+      if (typeof token !== "string" || !token.trim()) {
+        return json({ error: "Expected args[0] to be a non-empty token string" }, 400);
+      }
+      return json(await this.setGitHubToken(token));
+    }
+
+    if (url.pathname === "/createPR") {
+      const req = args[0];
+      if (!req || typeof req !== "object") {
+        return json({ error: "Expected args[0] to be a PR request object" }, 400);
+      }
+      return json(await this.createPR(req as PRRequest));
+    }
+
+    if (url.pathname === "/createPRReAct") {
+      const req = args[0];
+      if (!req || typeof req !== "object") {
+        return json({ error: "Expected args[0] to be a PR request object" }, 400);
+      }
+      return json(await this.createPRReAct(req as PRRequest));
+    }
+
+    if (url.pathname === "/reset") {
+      await this.reset();
+      return json({ success: true });
+    }
+
+    if (url.pathname === "/disconnect") {
+      return json(await this.disconnect());
+    }
+
+    return new Response("Not found", { status: 404 });
+  }
+
   // Add a progress message and broadcast to clients
   private addProgress(message: string) {
     console.log("Progress:", message);
@@ -252,7 +315,7 @@ export class GitHubPRAgent extends Agent<Env, AgentState> {
   }> {
     console.log("setGitHubToken called");
     try {
-      this.addProgress("Verifying GitHub token...");
+      this.addProgress("Verifying GitHub connection...");
 
       this.github = new GitHubAPI(token);
       const user = await this.github.getUser();
@@ -541,7 +604,7 @@ Output ONLY the JSON array. Start with [ end with ]`;
       this.setPlanStepRunning(step1);
       if (!this.ensureGitHubConnection()) {
         throw new Error(
-          "GitHub not connected. Please set your GitHub Personal Access Token first."
+          "GitHub not connected. Please sign in with GitHub first."
         );
       }
       this.setPlanStepCompleted(step1);
@@ -767,7 +830,7 @@ Output ONLY the JSON array. Start with [ end with ]`;
       if (!this.ensureGitHubConnection()) {
         return {
           success: false,
-          error: "GitHub not connected. Please set your GitHub Personal Access Token first.",
+          error: "GitHub not connected. Please sign in with GitHub first.",
         };
       }
 
