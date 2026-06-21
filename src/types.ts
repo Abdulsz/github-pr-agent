@@ -6,6 +6,10 @@ export interface Env {
   ASSETS: Fetcher;
   GitHubPRAgent: DurableObjectNamespace;
   JWT_SECRET: string;
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  /** Optional explicit OAuth callback URL (must match GitHub OAuth App settings exactly) */
+  GITHUB_OAUTH_CALLBACK_URL?: string;
   OPENAI_API_KEY?: string;
 }
 
@@ -147,6 +151,17 @@ export interface DashboardUser {
   passwordHash: string;
   name?: string;
   createdAt: string;
+}
+
+export interface GitHubConnection {
+  userId: string;
+  accessToken: string;
+  refreshToken?: string;
+  githubUserId: number;
+  githubUsername: string;
+  scopes?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ApiResponse<T = unknown> {

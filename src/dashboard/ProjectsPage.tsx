@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { DashboardShell } from "./DashboardShell";
+import { GitHubConnectButton } from "../components/GitHubConnect";
 
 interface Project {
   id: string;
@@ -7,12 +8,18 @@ interface Project {
   apiKey: string;
   description?: string;
   githubRepo?: string;
-  hasGithubToken: boolean;
+  hasGithubConnection: boolean;
+  githubUsername?: string;
   settings: {
     enableAutoPR: boolean;
     autoClassify: boolean;
   };
   createdAt: string;
+}
+
+interface GitHubStatus {
+  connected: boolean;
+  username?: string;
 }
 
 interface ProjectsPageProps {
@@ -34,10 +41,12 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
   const [formName, setFormName] = useState("");
   const [formDesc, setFormDesc] = useState("");
   const [formRepo, setFormRepo] = useState("");
-  const [formGithubToken, setFormGithubToken] = useState("");
   const [formAutoPR, setFormAutoPR] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [githubStatus, setGithubStatus] = useState<GitHubStatus>({ connected: false });
+  const [githubLoading, setGithubLoading] = useState(true);
+  const [connectingGithub, setConnectingGithub] = useState(false);
 
   const authHeaders = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
@@ -54,9 +63,65 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
     }
   }, [token]);
 
+  const fetchGitHubStatus = useCallback(async () => {
+    setGithubLoading(true);
+    try {
+      const res = await fetch("/api/github/oauth/status", { headers: authHeaders });
+      const data = (await res.json()) as { success: boolean; data?: GitHubStatus };
+      if (data.success && data.data) setGithubStatus(data.data);
+    } catch (e) {
+      console.error("Failed to fetch GitHub status:", e);
+    } finally {
+      setGithubLoading(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     fetchProjects();
-  }, [fetchProjects]);
+    fetchGitHubStatus();
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("github") === "connected") {
+      fetchGitHubStatus();
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [fetchProjects, fetchGitHubStatus]);
+
+  async function handleConnectGitHub() {
+    setConnectingGithub(true);
+    try {
+      const res = await fetch("/api/github/oauth/authorize", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          returnTo: "/projects",
+          frontendOrigin: window.location.origin,
+        }),
+      });
+      const data = (await res.json()) as { success: boolean; data?: { url: string }; error?: string };
+      if (data.success && data.data?.url) {
+        window.location.href = data.data.url;
+        return;
+      }
+      console.error("Failed to start GitHub OAuth:", data.error);
+    } catch (e) {
+      console.error("Failed to start GitHub OAuth:", e);
+    } finally {
+      setConnectingGithub(false);
+    }
+  }
+
+  async function handleDisconnectGitHub() {
+    try {
+      await fetch("/api/github/oauth/disconnect", {
+        method: "DELETE",
+        headers: authHeaders,
+      });
+      setGithubStatus({ connected: false });
+    } catch (e) {
+      console.error("Failed to disconnect GitHub:", e);
+    }
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -64,11 +129,15 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
     setCreating(true);
 
     try {
+      if (formAutoPR && formRepo && !githubStatus.connected) {
+        setCreateError("Connect your GitHub account before enabling auto-PR");
+        return;
+      }
+
       const body: Record<string, unknown> = {
         name: formName,
         description: formDesc || undefined,
         githubRepo: formRepo || undefined,
-        githubToken: formGithubToken || undefined,
         settings: { enableAutoPR: formAutoPR, autoClassify: true },
       };
 
@@ -93,7 +162,6 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
       setFormName("");
       setFormDesc("");
       setFormRepo("");
-      setFormGithubToken("");
       setFormAutoPR(false);
       setShowCreate(false);
       fetchProjects();
@@ -137,6 +205,35 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
             </p>
           </div>
         </header>
+
+        <div style={styles.card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "1rem" }}>GitHub Integration</h3>
+              <p style={{ margin: 0, color: "#5c6570", fontSize: "0.9rem" }}>
+                {githubLoading
+                  ? "Checking connection..."
+                  : githubStatus.connected
+                    ? `Connected as @${githubStatus.username}`
+                    : "Sign in with GitHub to enable auto-PR for your projects"}
+              </p>
+            </div>
+            {!githubLoading && (
+              githubStatus.connected ? (
+                <button onClick={handleDisconnectGitHub} style={{ ...styles.button, ...styles.secondaryButton, padding: "6px 16px", fontSize: "0.85rem" }}>
+                  Disconnect
+                </button>
+              ) : (
+                <GitHubConnectButton
+                  onClick={handleConnectGitHub}
+                  loading={connectingGithub}
+                  variant="light"
+                  label="Connect GitHub"
+                />
+              )
+            )}
+          </div>
+        </div>
 
         {/* Newly created project key display */}
         {createdKey && (
@@ -227,26 +324,20 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
 
               {formRepo && (
                 <>
-                  <label style={styles.label}>GitHub Personal Access Token</label>
-                  <input
-                    type="password"
-                    value={formGithubToken}
-                    onChange={(e) => setFormGithubToken(e.target.value)}
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                    style={styles.input}
-                    disabled={creating}
-                  />
-                  <p style={styles.helpText}>
-                    Needs <code style={styles.code}>repo</code> scope.
-                    Token is encrypted at rest. Required for auto-PR.
-                  </p>
+                  {!githubStatus.connected && (
+                    <div style={styles.warningBox}>
+                      <p style={{ margin: 0 }}>
+                        Connect your GitHub account above to enable auto-PR for this repository.
+                      </p>
+                    </div>
+                  )}
 
                   <label style={styles.checkboxRow}>
                     <input
                       type="checkbox"
                       checked={formAutoPR}
                       onChange={(e) => setFormAutoPR(e.target.checked)}
-                      disabled={creating}
+                      disabled={creating || !githubStatus.connected}
                     />
                     <span>Enable auto-PR for technical feedback</span>
                   </label>
@@ -347,6 +438,19 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
                       {p.settings.enableAutoPR && (
                         <span style={styles.autoPRBadge}>Auto-PR</span>
                       )}
+                    </div>
+                  )}
+
+                  {p.settings.enableAutoPR && (
+                    <div style={styles.metaRow}>
+                      <span style={styles.metaLabel}>GitHub</span>
+                      <span style={{ color: "#666", fontSize: "0.85rem" }}>
+                        {p.hasGithubConnection
+                          ? p.githubUsername
+                            ? `Connected as @${p.githubUsername}`
+                            : "Connected"
+                          : "Not connected"}
+                      </span>
                     </div>
                   )}
 
@@ -473,6 +577,15 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0.75rem 1rem",
     marginBottom: "0.75rem",
     color: "#fca5a5",
+    fontSize: "0.9rem",
+  },
+  warningBox: {
+    background: "#fffbeb",
+    border: "1px solid #fde68a",
+    borderRadius: 12,
+    padding: "0.75rem 1rem",
+    marginBottom: "0.75rem",
+    color: "#92400e",
     fontSize: "0.9rem",
   },
   textBtn: {

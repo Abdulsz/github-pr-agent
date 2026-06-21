@@ -4,6 +4,7 @@ import type {
   FeedbackClassification,
   FeedbackProjectSettings,
   DashboardUser,
+  GitHubConnection,
 } from "../types";
 
 export class FeedbackDB {
@@ -72,6 +73,18 @@ export class FeedbackDB {
       `),
       this.db.prepare(`
         CREATE INDEX IF NOT EXISTS idx_users_email ON dashboard_users(email)
+      `),
+      this.db.prepare(`
+        CREATE TABLE IF NOT EXISTS github_connections (
+          userId TEXT PRIMARY KEY,
+          accessToken TEXT NOT NULL,
+          refreshToken TEXT,
+          githubUserId INTEGER NOT NULL,
+          githubUsername TEXT NOT NULL,
+          scopes TEXT,
+          createdAt TEXT NOT NULL,
+          updatedAt TEXT NOT NULL
+        )
       `),
     ]);
 
@@ -303,6 +316,71 @@ export class FeedbackDB {
       .bind(userId)
       .first();
     return (row as DashboardUser | null) ?? null;
+  }
+
+  // --- GitHub OAuth connections ---
+
+  async upsertGitHubConnection(connection: {
+    userId: string;
+    accessToken: string;
+    refreshToken?: string;
+    githubUserId: number;
+    githubUsername: string;
+    scopes?: string;
+  }) {
+    const now = new Date().toISOString();
+    const existing = await this.getGitHubConnection(connection.userId);
+
+    if (existing) {
+      return this.db
+        .prepare(
+          `UPDATE github_connections
+           SET accessToken = ?, refreshToken = ?, githubUserId = ?, githubUsername = ?, scopes = ?, updatedAt = ?
+           WHERE userId = ?`
+        )
+        .bind(
+          connection.accessToken,
+          connection.refreshToken ?? null,
+          connection.githubUserId,
+          connection.githubUsername,
+          connection.scopes ?? null,
+          now,
+          connection.userId
+        )
+        .run();
+    }
+
+    return this.db
+      .prepare(
+        `INSERT INTO github_connections (userId, accessToken, refreshToken, githubUserId, githubUsername, scopes, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        connection.userId,
+        connection.accessToken,
+        connection.refreshToken ?? null,
+        connection.githubUserId,
+        connection.githubUsername,
+        connection.scopes ?? null,
+        now,
+        now
+      )
+      .run();
+  }
+
+  async getGitHubConnection(userId: string): Promise<GitHubConnection | null> {
+    const row = await this.db
+      .prepare(`SELECT * FROM github_connections WHERE userId = ?`)
+      .bind(userId)
+      .first();
+    return (row as GitHubConnection | null) ?? null;
+  }
+
+  async deleteGitHubConnection(userId: string) {
+    return this.db
+      .prepare(`DELETE FROM github_connections WHERE userId = ?`)
+      .bind(userId)
+      .run();
   }
 
   // --- Parsing helpers ---

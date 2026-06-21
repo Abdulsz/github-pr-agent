@@ -6,9 +6,9 @@ import {
   verifyPassword,
   signJWT,
   authenticateRequest,
-  encryptToken,
   decryptToken,
 } from "./auth";
+import { handleGitHubRoutes, getUserGitHubAccessToken } from "../github/routes";
 
 function jsonResponse(body: unknown, status = 200, extraHeaders?: Record<string, string>) {
   // 204 (No Content) and 205 (Reset Content) responses must not have a body
@@ -38,6 +38,9 @@ export async function handleFeedbackRoutes(
 
   const db = new FeedbackDB(env.DB);
   await db.init();
+
+  const githubResponse = await handleGitHubRoutes(request, env, pathname, db);
+  if (githubResponse) return githubResponse;
 
   // --- Auth routes (public) ---
 
@@ -289,8 +292,7 @@ async function handleSubmit(
     if (
       classification.type === "technical" &&
       project.settings.enableAutoPR &&
-      project.githubRepo &&
-      project.githubToken
+      project.githubRepo
     ) {
       triggerAutoPR(env, db, feedbackId, body, classification, project).catch(
         (e) => console.error("Auto-PR failed:", e)
@@ -313,17 +315,27 @@ async function triggerAutoPR(
   feedbackId: string,
   submission: FeedbackSubmission,
   classification: { type: string; extractedInfo?: Record<string, string> },
-  project: { githubRepo?: string; githubToken?: string; settings: FeedbackProjectSettings }
-) {
-  if (!project.githubRepo || !project.githubToken) return;
-
-  let token: string;
-  try {
-    token = await decryptToken(project.githubToken, env.JWT_SECRET);
-  } catch {
-    // Fallback: token may have been stored before encryption was added
-    token = project.githubToken;
+  project: {
+    ownerId: string;
+    githubRepo?: string;
+    githubToken?: string;
+    settings: FeedbackProjectSettings;
   }
+) {
+  if (!project.githubRepo) return;
+
+  let token = await getUserGitHubAccessToken(project.ownerId, env, db);
+
+  if (!token && project.githubToken) {
+    try {
+      token = await decryptToken(project.githubToken, env.JWT_SECRET);
+    } catch {
+      // Fallback: token may have been stored before encryption was added
+      token = project.githubToken;
+    }
+  }
+
+  if (!token) return;
 
   const prDescription = [
     `## User Feedback (${feedbackId})`,
@@ -419,17 +431,25 @@ async function handleCreateProject(
   const projectId = crypto.randomUUID();
   const apiKey = `fbk_${crypto.randomUUID().replace(/-/g, "")}`;
 
-  let encryptedGithubToken: string | undefined;
-  if (body.githubToken) {
-    encryptedGithubToken = await encryptToken(body.githubToken, env.JWT_SECRET);
-  }
-
   const settings: FeedbackProjectSettings = {
     enableAutoPR: body.settings?.enableAutoPR ?? false,
     autoClassify: body.settings?.autoClassify ?? true,
     prAssignee: body.settings?.prAssignee,
     defaultTargetBranch: body.settings?.defaultTargetBranch,
   };
+
+  if (settings.enableAutoPR && body.githubRepo) {
+    const connection = await db.getGitHubConnection(auth.user.id);
+    if (!connection) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Connect your GitHub account before enabling auto-PR",
+        },
+        400
+      );
+    }
+  }
 
   try {
     await db.createProject({
@@ -438,7 +458,6 @@ async function handleCreateProject(
       apiKey,
       description: body.description,
       ownerId: auth.user.id,
-      githubToken: encryptedGithubToken,
       githubRepo: body.githubRepo,
       settings,
     });
@@ -463,13 +482,15 @@ async function handleListProjects(
 
   try {
     const projects = await db.getProjectsByOwner(auth.user.id);
+    const userConnection = await db.getGitHubConnection(auth.user.id);
     const safe = projects.map((p) => ({
       id: p.id,
       name: p.name,
       apiKey: p.apiKey,
       description: p.description,
       githubRepo: p.githubRepo,
-      hasGithubToken: !!p.githubToken,
+      hasGithubConnection: !!userConnection || !!p.githubToken,
+      githubUsername: userConnection?.githubUsername,
       settings: p.settings,
       createdAt: p.createdAt,
     }));
@@ -494,6 +515,8 @@ async function handleGetProject(
     return jsonResponse({ success: false, error: "Project not found" }, 404);
   }
 
+  const userConnection = await db.getGitHubConnection(auth.user.id);
+
   return jsonResponse({
     success: true,
     data: {
@@ -502,7 +525,8 @@ async function handleGetProject(
       apiKey: project.apiKey,
       description: project.description,
       githubRepo: project.githubRepo,
-      hasGithubToken: !!project.githubToken,
+      hasGithubConnection: !!userConnection || !!project.githubToken,
+      githubUsername: userConnection?.githubUsername,
       settings: project.settings,
       createdAt: project.createdAt,
     },
@@ -536,24 +560,31 @@ async function handleUpdateProject(
     return jsonResponse({ success: false, error: "Invalid JSON body" }, 400);
   }
 
-  let encryptedGithubToken = project.githubToken;
-  if (body.githubToken !== undefined) {
-    encryptedGithubToken = body.githubToken
-      ? await encryptToken(body.githubToken, env.JWT_SECRET)
-      : undefined;
-  }
-
   const updatedSettings: FeedbackProjectSettings = {
     ...project.settings,
     ...body.settings,
   };
 
+  const githubRepo = body.githubRepo ?? project.githubRepo;
+  if (updatedSettings.enableAutoPR && githubRepo) {
+    const connection = await db.getGitHubConnection(auth.user.id);
+    if (!connection && !project.githubToken) {
+      return jsonResponse(
+        {
+          success: false,
+          error: "Connect your GitHub account before enabling auto-PR",
+        },
+        400
+      );
+    }
+  }
+
   try {
     await db.updateProject(projectId, {
       name: body.name ?? project.name,
       description: body.description ?? project.description,
-      githubRepo: body.githubRepo ?? project.githubRepo,
-      githubToken: encryptedGithubToken,
+      githubRepo,
+      githubToken: project.githubToken,
       settings: updatedSettings,
     });
 

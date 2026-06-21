@@ -5,6 +5,7 @@ import { AuthPage } from "./auth/AuthPage";
 import { ProjectsPage } from "./dashboard/ProjectsPage";
 import { Dashboard } from "./dashboard/Dashboard";
 import { FeedbackLanding } from "./landing/FeedbackLanding";
+import { GitHubConnectButton, buildAgentOAuthUrl } from "./components/GitHubConnect";
 
 type Page = "landing" | "auth" | "projects" | "dashboard" | "pr-agent";
 
@@ -325,8 +326,6 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: stri
   const [repoUrl, setRepoUrl] = useState("");
   const [description, setDescription] = useState("");
   const [branchName, setBranchName] = useState("");
-  const [githubToken, setGithubToken] = useState("");
-  const [githubUsername, setGithubUsername] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [useReAct, setUseReAct] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -343,39 +342,38 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: stri
     },
   });
 
-  const state = localState;
-  const displayUsername = githubUsername || (state as AgentState & { githubUsername?: string }).githubUsername || "user";
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const githubStatus = params.get("github");
+    const message = params.get("message");
 
-  const handleConnectGitHub = useCallback(async () => {
-    if (!githubToken.trim()) {
-      setConnectionError("Please enter your GitHub Personal Access Token");
+    if (githubStatus === "connected") {
+      setConnectionError("");
+    } else if (githubStatus === "error") {
+      setConnectionError(message || "GitHub sign-in failed");
+    }
+
+    if (githubStatus) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  const state = localState;
+  const displayUsername = state.githubUsername || "user";
+
+  const handleConnectGitHub = useCallback(() => {
+    if (!agent.name) {
+      setConnectionError("Agent is still connecting. Please try again in a moment.");
       return;
     }
     setIsConnecting(true);
     setConnectionError("");
-    try {
-      const result = await agent.call("setGitHubToken", [githubToken]);
-      if (result && typeof result === "object") {
-        const typedResult = result as { connected: boolean; username?: string; error?: string };
-        if (typedResult.connected && typedResult.username) {
-          setGithubUsername(typedResult.username);
-          setGithubToken("");
-        } else if (typedResult.error) {
-          setConnectionError(typedResult.error);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to connect to GitHub:", error);
-      setConnectionError(error instanceof Error ? error.message : "Failed to connect");
-    } finally {
-      setIsConnecting(false);
-    }
-  }, [agent, githubToken]);
+    window.location.href = buildAgentOAuthUrl(agent.name, "/agent");
+  }, [agent.name]);
 
   const handleDisconnect = useCallback(async () => {
     try {
       await agent.call("disconnect");
-      setGithubUsername("");
     } catch (error) {
       console.error("Failed to disconnect:", error);
     }
@@ -500,50 +498,21 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: stri
 
           {!state.githubConnected && (
             <div>
-              <label style={styles.label}>GitHub Personal Access Token</label>
-              <input
-                type="password"
-                value={githubToken}
-                onChange={(e) => setGithubToken(e.target.value)}
-                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                style={styles.input}
-                disabled={isConnecting}
-              />
               <p style={styles.helpText}>
-                Create a token at{" "}
-                <a
-                  href="https://github.com/settings/tokens/new?scopes=repo"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={styles.link}
-                >
-                  GitHub Settings
-                </a>{" "}
-                with <code>repo</code> scope
+                Sign in with your GitHub account to grant access to your repositories.
+                We request <code style={{ color: "#ccc" }}>repo</code> scope to create pull requests on your behalf.
               </p>
               {connectionError && (
                 <div style={{ ...styles.errorBox, marginBottom: "1rem" }}>
                   <p style={{ margin: 0, color: "#fff" }}>{connectionError}</p>
                 </div>
               )}
-              <button
+              <GitHubConnectButton
                 onClick={handleConnectGitHub}
-                style={{
-                  ...styles.button,
-                  ...styles.primaryButton,
-                  ...(isConnecting ? styles.disabledButton : {}),
-                }}
-                disabled={isConnecting}
-              >
-                {isConnecting ? (
-                  <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <span style={styles.spinner} />
-                    Connecting...
-                  </span>
-                ) : (
-                  "Connect to GitHub"
-                )}
-              </button>
+                disabled={!agent.identified}
+                loading={isConnecting}
+                variant="dark"
+              />
             </div>
           )}
         </div>
