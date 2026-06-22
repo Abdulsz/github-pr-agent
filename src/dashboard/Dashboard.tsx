@@ -26,24 +26,17 @@ export function Dashboard({ projectId, token, onBack, onLogout, onHome, onOpenAg
     if (!projectId) return;
     setLoading(true);
     try {
-      const url = new URL(
-        `/api/dashboard/projects/${projectId}/feedback`,
-        window.location.origin
-      );
+      const url = new URL(`/api/dashboard/projects/${projectId}/feedback`, window.location.origin);
       if (filter !== "all") url.searchParams.set("type", filter);
 
       const response = await fetch(url.toString(), { headers: authHeaders });
-
       if (response.status === 401) {
         onLogout();
         return;
       }
 
       if (response.ok) {
-        const data = (await response.json()) as {
-          success: boolean;
-          data?: Feedback[];
-        };
+        const data = (await response.json()) as { success: boolean; data?: Feedback[] };
         setFeedbackList(data.data ?? []);
       }
     } catch (e) {
@@ -59,14 +52,11 @@ export function Dashboard({ projectId, token, onBack, onLogout, onHome, onOpenAg
 
   async function updateStatus(feedbackId: string, status: string) {
     try {
-      const res = await fetch(
-        `/api/dashboard/projects/${projectId}/feedback/${feedbackId}`,
-        {
-          method: "PATCH",
-          headers: { ...authHeaders, "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
-        }
-      );
+      const res = await fetch(`/api/dashboard/projects/${projectId}/feedback/${feedbackId}`, {
+        method: "PATCH",
+        headers: { ...authHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
       if (res.status === 401) {
         onLogout();
         return;
@@ -97,110 +87,68 @@ export function Dashboard({ projectId, token, onBack, onLogout, onHome, onOpenAg
     >
       <main style={styles.main}>
         <header style={styles.header}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <button onClick={onBack} style={styles.backBtn}>
-              ← Projects
-            </button>
-            <h1 style={styles.title}>Inbox</h1>
-          </div>
-          <p style={styles.subtitle}>
-            Project {projectId.slice(0, 8)}… · Filter, triage, and update status.
-          </p>
+          <button onClick={onBack} style={styles.backBtn}>
+            Projects
+          </button>
+          <h1 style={styles.title}>Inbox</h1>
+          <p style={styles.subtitle}>Project {projectId.slice(0, 8)}. Filter, triage, and update status.</p>
         </header>
 
-        {/* Filter tabs */}
-        <div style={styles.card}>
-          <div style={{ display: "flex", gap: 8 }}>
-            {FILTER_TABS.map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setFilter(tab)}
-                style={{
-                  ...styles.filterBtn,
-                  ...(filter === tab ? styles.filterBtnActive : {}),
-                }}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
-          </div>
+        <div style={styles.toolbar}>
+          {FILTER_TABS.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setFilter(tab)}
+              style={{
+                ...styles.filterBtn,
+                ...(filter === tab ? styles.filterBtnActive : {}),
+              }}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
         </div>
 
-        {/* Feedback list */}
         {loading ? (
-          <div style={styles.card}>
-            <p style={{ margin: 0, color: "#5c6570" }}>Loading...</p>
+          <div style={styles.panel}>
+            <p style={styles.emptyText}>Loading...</p>
           </div>
         ) : feedbackList.length === 0 ? (
-          <div style={styles.card}>
-            <p style={{ margin: 0, color: "#5c6570" }}>
-              No feedback yet. Integrate the widget or use the API to submit feedback.
-            </p>
+          <div style={styles.panel}>
+            <p style={styles.emptyText}>No feedback yet. Add the widget to start collecting reports.</p>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={styles.list}>
             {feedbackList.map((fb) => (
-              <div key={fb.id} style={styles.card}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "flex-start",
-                    marginBottom: 8,
-                  }}
-                >
-                  <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 600 }}>
-                    {fb.title}
-                  </h3>
+              <article key={fb.id} style={styles.panel}>
+                <div style={styles.itemHead}>
+                  <h3 style={styles.itemTitle}>{fb.title}</h3>
                   <span
                     style={{
                       ...styles.badge,
-                      ...(fb.type === "technical"
-                        ? styles.badgeTechnical
-                        : styles.badgeNonTechnical),
+                      ...(fb.type === "technical" ? styles.badgeDark : styles.badgeLight),
                     }}
                   >
                     {fb.type}
                   </span>
                 </div>
 
-                {fb.category && (
-                  <span style={styles.categoryBadge}>{fb.category}</span>
-                )}
+                {fb.category && <span style={styles.categoryBadge}>{fb.category}</span>}
 
-                <p style={{ margin: "8px 0", color: "#404852", fontSize: "0.9rem" }}>
-                  {fb.description}
-                </p>
+                <p style={styles.description}>{fb.description}</p>
 
                 {fb.relatedPRUrl && (
-                  <a
-                    href={fb.relatedPRUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={styles.prLink}
-                  >
-                    {"-> View PR #"}
-                    {fb.relatedPRNumber}
+                  <a href={fb.relatedPRUrl} target="_blank" rel="noopener noreferrer" style={styles.prLink}>
+                    View PR #{fb.relatedPRNumber}
                   </a>
                 )}
 
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginTop: 12,
-                  }}
-                >
-                  <small style={{ color: "#666" }}>
-                    {fb.email && `${fb.email} · `}
+                <div style={styles.itemFooter}>
+                  <small style={styles.meta}>
+                    {fb.email && `${fb.email} - `}
                     {new Date(fb.createdAt).toLocaleDateString()}
                   </small>
-                  <select
-                    value={fb.status}
-                    onChange={(e) => updateStatus(fb.id, e.target.value)}
-                    style={styles.statusSelect}
-                  >
+                  <select value={fb.status} onChange={(e) => updateStatus(fb.id, e.target.value)} style={styles.statusSelect}>
                     {STATUS_OPTIONS.map((s) => (
                       <option key={s} value={s}>
                         {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -208,7 +156,7 @@ export function Dashboard({ projectId, token, onBack, onLogout, onHome, onOpenAg
                     ))}
                   </select>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         )}
@@ -219,96 +167,147 @@ export function Dashboard({ projectId, token, onBack, onLogout, onHome, onOpenAg
 
 const styles: Record<string, React.CSSProperties> = {
   main: {
-    maxWidth: 900,
+    maxWidth: 940,
     margin: "0 auto",
-    padding: "2rem",
+    padding: "2.5rem",
     fontFamily: '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif',
   },
   header: {
     marginBottom: "2rem",
   },
   title: {
-    fontSize: "2rem",
-    fontWeight: 700,
-    color: "#262a41",
-    margin: 0,
-    letterSpacing: "-0.02em",
+    margin: "0.6rem 0 0",
+    fontSize: "2.6rem",
+    lineHeight: 0.96,
+    fontWeight: 800,
+    color: "#000",
+    letterSpacing: "-0.05em",
   },
   subtitle: {
-    color: "#5c6570",
+    color: "rgba(0,0,0,0.62)",
     fontSize: "1rem",
-    marginTop: "0.5rem",
+    marginTop: "0.7rem",
   },
   backBtn: {
     background: "none",
     border: "none",
-    color: "#5c6570",
+    color: "rgba(0,0,0,0.62)",
     cursor: "pointer",
     fontSize: "0.9rem",
     padding: 0,
-    whiteSpace: "nowrap" as const,
+    whiteSpace: "nowrap",
+    fontFamily: "inherit",
+    fontWeight: 700,
   },
-  card: {
-    background: "#fff",
-    borderRadius: 16,
-    padding: "1.25rem",
+  toolbar: {
+    display: "flex",
+    gap: 8,
     marginBottom: "1rem",
-    border: "1px solid #e8ecf2",
-    boxShadow: "0 1px 2px rgba(16,24,40,0.04)",
+    flexWrap: "wrap",
   },
   filterBtn: {
-    padding: "6px 14px",
-    borderRadius: 8,
-    border: "1px solid #d2dce8",
+    padding: "7px 14px",
+    borderRadius: 3,
+    border: "1px solid rgba(0,0,0,0.24)",
     background: "#fff",
-    color: "#5c6570",
+    color: "rgba(0,0,0,0.62)",
     cursor: "pointer",
-    fontSize: "0.85rem",
-    fontWeight: 500,
+    fontSize: "0.86rem",
+    fontWeight: 800,
+    fontFamily: "inherit",
   },
   filterBtnActive: {
-    background: "#101010",
+    background: "#000",
     color: "#fff",
-    borderColor: "#101010",
+    borderColor: "#000",
+  },
+  list: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  panel: {
+    background: "#fff",
+    borderRadius: 3,
+    padding: "1.25rem",
+    border: "1px solid rgba(0,0,0,0.18)",
+  },
+  emptyText: {
+    margin: 0,
+    color: "rgba(0,0,0,0.62)",
+  },
+  itemHead: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 8,
+  },
+  itemTitle: {
+    margin: 0,
+    fontSize: "1.05rem",
+    fontWeight: 800,
+    color: "#000",
   },
   badge: {
     padding: "3px 8px",
-    borderRadius: 4,
+    borderRadius: 3,
     fontSize: 12,
-    fontWeight: 600,
-    whiteSpace: "nowrap" as const,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+    border: "1px solid #000",
   },
-  badgeTechnical: {
-    background: "rgba(59,130,246,0.2)",
-    color: "#60a5fa",
+  badgeDark: {
+    background: "#000",
+    color: "#fff",
   },
-  badgeNonTechnical: {
-    background: "rgba(251,191,36,0.2)",
-    color: "#fbbf24",
+  badgeLight: {
+    background: "#fff",
+    color: "#000",
   },
   categoryBadge: {
     display: "inline-block",
     padding: "2px 8px",
-    borderRadius: 4,
+    borderRadius: 3,
     fontSize: 11,
-    fontWeight: 500,
-    background: "#f4f6fa",
-    color: "#5c6570",
-    textTransform: "uppercase" as const,
+    fontWeight: 800,
+    background: "#fff",
+    color: "#000",
+    border: "1px solid rgba(0,0,0,0.24)",
+    textTransform: "uppercase",
     letterSpacing: "0.05em",
   },
+  description: {
+    margin: "10px 0",
+    color: "#000",
+    fontSize: "0.93rem",
+    lineHeight: 1.55,
+  },
   prLink: {
-    color: "#60a5fa",
-    textDecoration: "none",
+    color: "#000",
+    textDecoration: "underline",
+    textUnderlineOffset: "3px",
     fontSize: 14,
     display: "inline-block",
+    fontWeight: 800,
+  },
+  itemFooter: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 14,
+    flexWrap: "wrap",
+  },
+  meta: {
+    color: "rgba(0,0,0,0.62)",
   },
   statusSelect: {
-    padding: "4px 8px",
-    borderRadius: 6,
-    border: "1px solid #d2dce8",
+    padding: "5px 8px",
+    borderRadius: 3,
+    border: "1px solid rgba(0,0,0,0.24)",
     background: "#fff",
-    color: "#262a41",
+    color: "#000",
     fontSize: 13,
     cursor: "pointer",
   },

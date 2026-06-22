@@ -209,8 +209,8 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
         <div style={styles.card}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
             <div>
-              <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "1rem" }}>GitHub Integration</h3>
-              <p style={{ margin: 0, color: "#5c6570", fontSize: "0.9rem" }}>
+              <h3 style={{ margin: "0 0 0.25rem 0", fontSize: "1rem" }}>GitHub integration</h3>
+              <p style={{ margin: 0, color: "rgba(0,0,0,0.62)", fontSize: "0.9rem" }}>
                 {githubLoading
                   ? "Checking connection..."
                   : githubStatus.connected
@@ -238,10 +238,10 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
         {/* Newly created project key display */}
         {createdKey && (
           <div style={styles.successCard}>
-            <h3 style={{ margin: "0 0 0.75rem 0", color: "#14532d" }}>
+            <h3 style={{ margin: "0 0 0.75rem 0", color: "#000" }}>
               Project "{createdKey.name}" created
             </h3>
-            <p style={{ margin: "0 0 1rem 0", color: "#3f6212", fontSize: "0.9rem" }}>
+            <p style={{ margin: "0 0 1rem 0", color: "rgba(0,0,0,0.62)", fontSize: "0.9rem" }}>
               Save these credentials -- the API key won't be shown in full again.
             </p>
 
@@ -282,13 +282,13 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
             onClick={() => setShowCreate(true)}
             style={{ ...styles.button, ...styles.primaryButton, marginBottom: "1.5rem" }}
           >
-            + New Project
+            New project
           </button>
         ) : (
           <div style={styles.card}>
-            <h3 style={{ margin: "0 0 1rem 0" }}>New Project</h3>
+            <h3 style={{ margin: "0 0 1rem 0" }}>New project</h3>
             <form onSubmit={handleCreate}>
-              <label style={styles.label}>Project Name *</label>
+              <label style={styles.label}>Project name *</label>
               <input
                 type="text"
                 value={formName}
@@ -377,11 +377,11 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
         {/* Project list */}
         {loading ? (
           <div style={styles.card}>
-            <p style={{ margin: 0, color: "#5c6570" }}>Loading projects...</p>
+                <p style={{ margin: 0, color: "rgba(0,0,0,0.62)" }}>Loading projects...</p>
           </div>
         ) : projects.length === 0 && !showCreate ? (
           <div style={styles.card}>
-            <p style={{ margin: 0, color: "#5c6570" }}>
+            <p style={{ margin: 0, color: "rgba(0,0,0,0.62)" }}>
               No projects yet. Create one to get started.
             </p>
           </div>
@@ -393,7 +393,7 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
                   <div>
                     <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 600 }}>{p.name}</h3>
                     {p.description && (
-                      <p style={{ margin: "4px 0 0 0", color: "#5c6570", fontSize: "0.9rem" }}>
+                      <p style={{ margin: "4px 0 0 0", color: "rgba(0,0,0,0.62)", fontSize: "0.9rem" }}>
                         {p.description}
                       </p>
                     )}
@@ -434,7 +434,7 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
                   {p.githubRepo && (
                     <div style={styles.metaRow}>
                       <span style={styles.metaLabel}>Repo</span>
-                      <span style={{ color: "#aaa", fontSize: "0.85rem" }}>{p.githubRepo}</span>
+                      <span style={{ color: "rgba(0,0,0,0.62)", fontSize: "0.85rem" }}>{p.githubRepo}</span>
                       {p.settings.enableAutoPR && (
                         <span style={styles.autoPRBadge}>Auto-PR</span>
                       )}
@@ -444,7 +444,7 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
                   {p.settings.enableAutoPR && (
                     <div style={styles.metaRow}>
                       <span style={styles.metaLabel}>GitHub</span>
-                      <span style={{ color: "#666", fontSize: "0.85rem" }}>
+                      <span style={{ color: "rgba(0,0,0,0.62)", fontSize: "0.85rem" }}>
                         {p.hasGithubConnection
                           ? p.githubUsername
                             ? `Connected as @${p.githubUsername}`
@@ -456,7 +456,7 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
 
                   <div style={styles.metaRow}>
                     <span style={styles.metaLabel}>Created</span>
-                    <span style={{ color: "#666", fontSize: "0.85rem" }}>
+                    <span style={{ color: "rgba(0,0,0,0.62)", fontSize: "0.85rem" }}>
                       {new Date(p.createdAt).toLocaleDateString()}
                     </span>
                   </div>
@@ -483,44 +483,44 @@ const styles: Record<string, React.CSSProperties> = {
   title: {
     fontSize: "2rem",
     fontWeight: 700,
-    color: "#262a41",
+    color: "#000",
     margin: 0,
     letterSpacing: "-0.02em",
   },
   subtitle: {
-    color: "#5c6570",
+    color: "rgba(0,0,0,0.62)",
     fontSize: "1rem",
     marginTop: "0.25rem",
   },
   card: {
     background: "#fff",
-    borderRadius: 16,
+    borderRadius: 3,
     padding: "1.5rem",
     marginBottom: "1rem",
-    border: "1px solid #e8ecf2",
-    boxShadow: "0 1px 2px rgba(16,24,40,0.04)",
+    border: "1px solid rgba(0,0,0,0.18)",
+    boxShadow: "none",
   },
   successCard: {
-    background: "#f0fdf4",
-    borderRadius: 16,
+    background: "#fff",
+    borderRadius: 3,
     padding: "1.5rem",
     marginBottom: "1.5rem",
-    border: "1px solid #bbf7d0",
+    border: "1px solid #000",
   },
   label: {
     display: "block",
     marginBottom: "0.5rem",
     fontWeight: 500,
-    color: "#262a41",
+    color: "#000",
     fontSize: "0.9rem",
   },
   input: {
     width: "100%",
     padding: "0.75rem 1rem",
-    borderRadius: 12,
-    border: "1px solid #d2dce8",
+    borderRadius: 3,
+    border: "1px solid rgba(0,0,0,0.24)",
     background: "#fff",
-    color: "#262a41",
+    color: "#000",
     fontSize: "1rem",
     marginBottom: "0.75rem",
     outline: "none",
@@ -528,14 +528,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   helpText: {
     fontSize: "0.8rem",
-    color: "#5c6570",
+    color: "rgba(0,0,0,0.62)",
     marginTop: "-0.5rem",
     marginBottom: "1rem",
   },
   code: {
-    background: "#f4f6fa",
+    background: "#fff",
     padding: "1px 5px",
-    borderRadius: 4,
+    borderRadius: 3,
     fontSize: "0.85rem",
   },
   checkboxRow: {
@@ -543,55 +543,55 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: "0.5rem",
     cursor: "pointer",
-    color: "#262a41",
+    color: "#000",
     fontSize: "0.9rem",
     marginBottom: "0.5rem",
   },
   button: {
     padding: "0.75rem 1.5rem",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.2)",
+    borderRadius: 3,
+    border: "1px solid #000",
     fontWeight: 600,
     fontSize: "0.9rem",
     cursor: "pointer",
     transition: "border-color 0.2s, opacity 0.2s",
   },
   primaryButton: {
-    background: "#101010",
+    background: "#000",
     color: "#fff",
-    borderColor: "#101010",
+    borderColor: "#000",
   },
   secondaryButton: {
     background: "transparent",
-    color: "#262a41",
-    borderColor: "#d2dce8",
+    color: "#000",
+    borderColor: "rgba(0,0,0,0.24)",
   },
   disabledButton: {
     opacity: 0.5,
     cursor: "not-allowed",
   },
   errorBox: {
-    background: "rgba(239, 68, 68, 0.15)",
-    border: "1px solid rgba(239, 68, 68, 0.3)",
-    borderRadius: 12,
+    background: "#fff",
+    border: "1px solid #000",
+    borderRadius: 3,
     padding: "0.75rem 1rem",
     marginBottom: "0.75rem",
-    color: "#fca5a5",
+    color: "#000",
     fontSize: "0.9rem",
   },
   warningBox: {
-    background: "#fffbeb",
-    border: "1px solid #fde68a",
-    borderRadius: 12,
+    background: "#fff",
+    border: "1px solid #000",
+    borderRadius: 3,
     padding: "0.75rem 1rem",
     marginBottom: "0.75rem",
-    color: "#92400e",
+    color: "#000",
     fontSize: "0.9rem",
   },
   textBtn: {
     background: "none",
     border: "none",
-    color: "#888",
+    color: "rgba(0,0,0,0.62)",
     cursor: "pointer",
     fontSize: "0.85rem",
     textDecoration: "underline",
@@ -605,17 +605,17 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "0.5rem",
   },
   credLabel: {
-    color: "#888",
+    color: "rgba(0,0,0,0.62)",
     fontSize: "0.85rem",
     fontWeight: 500,
     minWidth: 80,
   },
   credValue: {
-    background: "#f4f6fa",
+    background: "#fff",
     padding: "4px 10px",
-    borderRadius: 6,
+    borderRadius: 3,
     fontSize: "0.85rem",
-    color: "#262a41",
+    color: "#000",
     flex: 1,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -623,10 +623,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   copyBtn: {
     background: "#fff",
-    border: "1px solid #d2dce8",
-    color: "#262a41",
+    border: "1px solid rgba(0,0,0,0.24)",
+    color: "#000",
     padding: "4px 12px",
-    borderRadius: 6,
+    borderRadius: 3,
     cursor: "pointer",
     fontSize: "0.8rem",
     fontWeight: 500,
@@ -638,23 +638,23 @@ const styles: Record<string, React.CSSProperties> = {
     gap: "0.75rem",
   },
   metaLabel: {
-    color: "#666",
+    color: "rgba(0,0,0,0.62)",
     fontSize: "0.8rem",
     fontWeight: 500,
     minWidth: 70,
   },
   metaValue: {
-    background: "#f4f6fa",
+    background: "#fff",
     padding: "2px 8px",
-    borderRadius: 4,
+    borderRadius: 3,
     fontSize: "0.8rem",
-    color: "#404852",
+    color: "#000",
   },
   autoPRBadge: {
-    background: "rgba(59,130,246,0.2)",
-    color: "#60a5fa",
+    background: "#000",
+    color: "#fff",
     padding: "2px 8px",
-    borderRadius: 4,
+    borderRadius: 3,
     fontSize: "0.75rem",
     fontWeight: 600,
   },

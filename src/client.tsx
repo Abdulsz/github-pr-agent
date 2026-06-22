@@ -18,7 +18,7 @@ const styles = {
     fontFamily: '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif',
   },
   main: {
-    maxWidth: "800px",
+    maxWidth: "860px",
     margin: "0 auto",
     padding: "2rem",
   },
@@ -27,21 +27,21 @@ const styles = {
     marginBottom: "3rem",
   },
   title: {
-    fontSize: "2.5rem",
-    fontWeight: 700,
+    fontSize: "3rem",
+    fontWeight: 800,
     color: "#fff",
     marginBottom: "0.5rem",
-    letterSpacing: "-0.02em",
+    letterSpacing: "-0.05em",
   },
   subtitle: {
-    color: "#888",
+    color: "rgba(255,255,255,0.62)",
     fontSize: "1.1rem",
   },
   card: {
     background: "rgba(255, 255, 255, 0.06)",
     backdropFilter: "blur(12px)",
     WebkitBackdropFilter: "blur(12px)",
-    borderRadius: "16px",
+    borderRadius: "3px",
     padding: "2rem",
     marginBottom: "1.5rem",
     border: "1px solid rgba(255, 255, 255, 0.12)",
@@ -55,7 +55,7 @@ const styles = {
   input: {
     width: "100%",
     padding: "0.75rem 1rem",
-    borderRadius: "12px",
+    borderRadius: "3px",
     border: "1px solid rgba(255, 255, 255, 0.2)",
     background: "rgba(255, 255, 255, 0.06)",
     color: "#fff",
@@ -68,7 +68,7 @@ const styles = {
   textarea: {
     width: "100%",
     padding: "0.75rem 1rem",
-    borderRadius: "12px",
+    borderRadius: "3px",
     border: "1px solid rgba(255, 255, 255, 0.2)",
     background: "rgba(255, 255, 255, 0.06)",
     color: "#fff",
@@ -82,7 +82,7 @@ const styles = {
   },
   button: {
     padding: "0.875rem 2rem",
-    borderRadius: "12px",
+    borderRadius: "3px",
     border: "1px solid rgba(255, 255, 255, 0.2)",
     fontWeight: 600,
     fontSize: "1rem",
@@ -107,7 +107,7 @@ const styles = {
     display: "inline-flex",
     alignItems: "center",
     padding: "0.25rem 0.75rem",
-    borderRadius: "12px",
+    borderRadius: "3px",
     fontSize: "0.875rem",
     fontWeight: 500,
     border: "1px solid rgba(255, 255, 255, 0.12)",
@@ -118,7 +118,7 @@ const styles = {
   },
   disconnectedBadge: {
     borderColor: "rgba(255, 255, 255, 0.12)",
-    color: "#888",
+    color: "rgba(255,255,255,0.62)",
   },
   progressList: {
     listStyle: "none",
@@ -137,7 +137,7 @@ const styles = {
     backdropFilter: "blur(12px)",
     WebkitBackdropFilter: "blur(12px)",
     border: "1px solid rgba(255, 255, 255, 0.2)",
-    borderRadius: "16px",
+    borderRadius: "3px",
     padding: "1rem",
   },
   errorBox: {
@@ -145,7 +145,7 @@ const styles = {
     backdropFilter: "blur(12px)",
     WebkitBackdropFilter: "blur(12px)",
     border: "1px solid rgba(255, 255, 255, 0.2)",
-    borderRadius: "16px",
+    borderRadius: "3px",
     padding: "1rem",
   },
   link: {
@@ -165,7 +165,7 @@ const styles = {
   },
   helpText: {
     fontSize: "0.85rem",
-    color: "#888",
+    color: "rgba(255,255,255,0.62)",
     marginTop: "0.25rem",
     marginBottom: "1rem",
   },
@@ -427,7 +427,7 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: stri
                 type="button"
                 onClick={() => onNavigate("landing")}
                 style={{
-                  color: "#888",
+                  color: "rgba(255,255,255,0.62)",
                   fontSize: "0.9rem",
                   border: "1px solid rgba(255,255,255,0.15)",
                   padding: "6px 14px",
@@ -445,7 +445,7 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: stri
                   onNavigate(t ? "projects" : "auth");
                 }}
                 style={{
-                  color: "#888",
+                  color: "rgba(255,255,255,0.62)",
                   fontSize: "0.9rem",
                   border: "1px solid rgba(255,255,255,0.15)",
                   padding: "6px 14px",
@@ -500,7 +500,7 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: stri
             <div>
               <p style={styles.helpText}>
                 Sign in with your GitHub account to grant access to your repositories.
-                We request <code style={{ color: "#ccc" }}>repo</code> scope to create pull requests on your behalf.
+                We request <code style={{ color: "#fff" }}>repo</code> scope to create pull requests on your behalf.
               </p>
               {connectionError && (
                 <div style={{ ...styles.errorBox, marginBottom: "1rem" }}>
@@ -610,7 +610,7 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: stri
         {state.plan && state.plan.steps.length > 0 && !state.result && (
           <div style={{ ...styles.card, ...styles.planCard }}>
             <h3 style={{ marginTop: 0, marginBottom: "0.5rem" }}>Execution plan</h3>
-            <p style={{ margin: "0 0 1rem 0", fontSize: "0.875rem", color: "#888" }}>
+            <p style={{ margin: "0 0 1rem 0", fontSize: "0.875rem", color: "rgba(255,255,255,0.62)" }}>
               Step {state.plan.currentStepIndex + 1} of {state.plan.steps.length}
             </p>
             <ul style={styles.stepList}>
@@ -618,11 +618,11 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: stri
                 const icon =
                   step.status === "completed" ? "✓" : step.status === "running" ? "●" : step.status === "error" ? "✗" : "○";
                 const color =
-                  step.status === "completed" ? "#fff" : step.status === "running" ? "#fff" : step.status === "error" ? "#fff" : "#888";
+                  step.status === "completed" ? "#fff" : step.status === "running" ? "#fff" : step.status === "error" ? "#fff" : "rgba(255,255,255,0.62)";
                 return (
                   <li key={step.id} style={styles.stepItem}>
                     <span style={{ ...styles.stepIcon, color }}>{icon}</span>
-                    <span style={{ color: step.status === "pending" ? "#888" : "#fff" }}>{step.label}</span>
+                    <span style={{ color: step.status === "pending" ? "rgba(255,255,255,0.62)" : "#fff" }}>{step.label}</span>
                     {step.error && (
                       <span style={{ color: "#fff", fontSize: "0.8rem", opacity: 0.9 }}> — {step.error}</span>
                     )}
@@ -674,7 +674,7 @@ function PRAgentPage({ onNavigate }: { onNavigate: (page: Page, projectId?: stri
           </div>
         )}
 
-        <footer style={{ textAlign: "center", marginTop: "2rem", color: "#888", fontSize: "0.875rem" }}>
+        <footer style={{ textAlign: "center", marginTop: "2rem", color: "rgba(255,255,255,0.62)", fontSize: "0.875rem" }}>
           <p>
             Built with{" "}
             <a href="https://developers.cloudflare.com/agents/" target="_blank" rel="noopener noreferrer" style={styles.link}>

@@ -27,11 +27,12 @@ export function DashboardShell({
         <button type="button" onClick={onHome} style={styles.brandBtn}>
           DevFeedback
         </button>
+
         <div style={styles.profileBlock}>
-          <div style={styles.avatar} aria-hidden />
           <div style={styles.profileName}>{userLabel}</div>
           {userSub && <div style={styles.profileEmail}>{userSub}</div>}
         </div>
+
         <nav style={styles.nav}>
           <button
             type="button"
@@ -46,12 +47,13 @@ export function DashboardShell({
           <span
             style={{
               ...styles.navItem,
-              ...(active === "dashboard" ? styles.navItemActive : { opacity: 0.45, cursor: "default" }),
+              ...(active === "dashboard" ? styles.navItemActive : styles.navItemMuted),
             }}
           >
             Inbox
           </span>
         </nav>
+
         <div style={styles.sideFooter}>
           <button type="button" onClick={onAgent} style={styles.sideLink}>
             PR Agent
@@ -71,102 +73,105 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: "100vh",
     display: "flex",
     fontFamily: '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif',
-    background: "#0c0c0c",
-    color: "#262a41",
+    background: "#000",
+    color: "#000",
   },
   sidebar: {
-    width: 220,
+    width: 236,
     flexShrink: 0,
-    background: "#141414",
+    background: "#000",
     color: "#fff",
-    padding: "1.25rem 1rem",
+    padding: "1.25rem",
     display: "flex",
-    flexDirection: "column" as const,
-    borderRight: "1px solid rgba(255,255,255,0.06)",
+    flexDirection: "column",
+    borderRight: "1px solid rgba(255,255,255,0.22)",
   },
   brandBtn: {
     background: "none",
     border: "none",
     color: "#fff",
-    fontWeight: 700,
+    fontWeight: 800,
     fontSize: "1.05rem",
-    letterSpacing: "-0.02em",
     cursor: "pointer",
-    textAlign: "left" as const,
-    padding: "0 0 1.25rem 0",
+    textAlign: "left",
+    padding: "0 0 1.4rem",
     fontFamily: "inherit",
   },
   profileBlock: {
-    marginBottom: "1.5rem",
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    background: "rgba(255,255,255,0.12)",
-    marginBottom: 10,
+    borderTop: "1px solid rgba(255,255,255,0.22)",
+    borderBottom: "1px solid rgba(255,255,255,0.22)",
+    padding: "1rem 0",
+    marginBottom: "1rem",
   },
   profileName: {
-    fontWeight: 600,
+    fontWeight: 800,
     fontSize: "0.95rem",
   },
   profileEmail: {
-    fontSize: "0.8rem",
-    opacity: 0.55,
-    marginTop: 2,
+    fontSize: "0.78rem",
+    color: "rgba(255,255,255,0.62)",
+    marginTop: 4,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   },
   nav: {
     display: "flex",
-    flexDirection: "column" as const,
+    flexDirection: "column",
     gap: 4,
     flex: 1,
   },
   navItem: {
     background: "transparent",
-    border: "none",
-    color: "rgba(255,255,255,0.45)",
-    textAlign: "left" as const,
+    border: "1px solid transparent",
+    color: "rgba(255,255,255,0.62)",
+    textAlign: "left",
     padding: "10px 12px",
-    borderRadius: 10,
+    borderRadius: 3,
     fontSize: "0.9rem",
-    fontWeight: 500,
+    fontWeight: 800,
     cursor: "pointer",
     fontFamily: "inherit",
   },
   navItemActive: {
-    background: "rgba(255,255,255,0.1)",
-    color: "#fff",
+    background: "#fff",
+    color: "#000",
+    borderColor: "#fff",
+  },
+  navItemMuted: {
+    cursor: "default",
   },
   sideFooter: {
     display: "flex",
-    flexDirection: "column" as const,
+    flexDirection: "column",
     gap: 8,
     paddingTop: "1rem",
-    borderTop: "1px solid rgba(255,255,255,0.08)",
+    borderTop: "1px solid rgba(255,255,255,0.22)",
   },
   sideLink: {
     background: "none",
     border: "none",
-    color: "rgba(255,255,255,0.65)",
-    textAlign: "left" as const,
-    padding: "6px 12px",
-    fontSize: "0.85rem",
+    color: "#fff",
+    textAlign: "left",
+    padding: "6px 0",
+    fontSize: "0.86rem",
     cursor: "pointer",
     fontFamily: "inherit",
+    fontWeight: 700,
   },
   sideLinkMuted: {
     background: "none",
     border: "none",
-    color: "rgba(255,255,255,0.35)",
-    textAlign: "left" as const,
-    padding: "6px 12px",
-    fontSize: "0.8rem",
+    color: "rgba(255,255,255,0.55)",
+    textAlign: "left",
+    padding: "6px 0",
+    fontSize: "0.86rem",
     cursor: "pointer",
     fontFamily: "inherit",
+    fontWeight: 700,
   },
   mainWrap: {
     flex: 1,
-    background: "#f4f6fa",
+    background: "#fff",
     overflow: "auto",
   },
 };

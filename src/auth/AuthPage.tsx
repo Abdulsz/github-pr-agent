@@ -56,16 +56,14 @@ export function AuthPage({ onAuth, onBackHome }: AuthPageProps) {
         <header style={styles.header}>
           {onBackHome && (
             <button type="button" onClick={onBackHome} style={styles.backLink}>
-              ← DevFeedback
+              Back to DevFeedback
             </button>
           )}
-          <h1 style={styles.title}>Sign in</h1>
-          <p style={styles.subtitle}>
-            {mode === "login" ? "Dashboard access" : "Create an account"}
-          </p>
+          <h1 style={styles.title}>{mode === "login" ? "Sign in" : "Create account"}</h1>
+          <p style={styles.subtitle}>Access your feedback workspace.</p>
         </header>
 
-        <div style={styles.card}>
+        <div style={styles.panel}>
           <form onSubmit={handleSubmit}>
             {mode === "register" && (
               <div>
@@ -81,38 +79,30 @@ export function AuthPage({ onAuth, onBackHome }: AuthPageProps) {
               </div>
             )}
 
-            <div>
-              <label style={styles.label}>Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                style={styles.input}
-                required
-                disabled={loading}
-              />
-            </div>
+            <label style={styles.label}>Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              style={styles.input}
+              required
+              disabled={loading}
+            />
 
-            <div>
-              <label style={styles.label}>Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === "register" ? "At least 8 characters" : "Your password"}
-                style={styles.input}
-                required
-                minLength={mode === "register" ? 8 : undefined}
-                disabled={loading}
-              />
-            </div>
+            <label style={styles.label}>Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={mode === "register" ? "At least 8 characters" : "Your password"}
+              style={styles.input}
+              required
+              minLength={mode === "register" ? 8 : undefined}
+              disabled={loading}
+            />
 
-            {error && (
-              <div style={styles.errorBox}>
-                <p style={{ margin: 0 }}>{error}</p>
-              </div>
-            )}
+            {error && <div style={styles.errorBox}>{error}</div>}
 
             <button
               type="submit"
@@ -122,7 +112,7 @@ export function AuthPage({ onAuth, onBackHome }: AuthPageProps) {
                 ...styles.primaryButton,
                 ...(loading ? styles.disabledButton : {}),
                 width: "100%",
-                marginTop: "0.5rem",
+                marginTop: 8,
               }}
             >
               {loading
@@ -130,16 +120,17 @@ export function AuthPage({ onAuth, onBackHome }: AuthPageProps) {
                   ? "Signing in..."
                   : "Creating account..."
                 : mode === "login"
-                  ? "Sign In"
-                  : "Create Account"}
+                  ? "Sign in"
+                  : "Create account"}
             </button>
           </form>
 
           <div style={styles.switchRow}>
-            <span style={{ color: "#888" }}>
-              {mode === "login" ? "Don't have an account?" : "Already have an account?"}
+            <span style={styles.mutedText}>
+              {mode === "login" ? "Need an account?" : "Already have an account?"}
             </span>
             <button
+              type="button"
               onClick={() => {
                 setMode(mode === "login" ? "register" : "login");
                 setError("");
@@ -158,8 +149,8 @@ export function AuthPage({ onAuth, onBackHome }: AuthPageProps) {
 const styles: Record<string, React.CSSProperties> = {
   container: {
     minHeight: "100vh",
-    background: "#000",
-    color: "#fff",
+    background: "#fff",
+    color: "#000",
     fontFamily: '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif',
     display: "flex",
     alignItems: "center",
@@ -167,87 +158,85 @@ const styles: Record<string, React.CSSProperties> = {
   },
   main: {
     width: "100%",
-    maxWidth: 440,
+    maxWidth: 460,
     padding: "2rem",
   },
   header: {
-    textAlign: "center",
     marginBottom: "2rem",
   },
   backLink: {
-    display: "block",
-    marginBottom: "1.25rem",
+    display: "inline-flex",
+    marginBottom: "1.35rem",
     background: "none",
     border: "none",
-    color: "#888",
+    color: "rgba(0,0,0,0.62)",
     fontSize: "0.9rem",
     cursor: "pointer",
     fontFamily: "inherit",
-    width: "100%",
+    padding: 0,
   },
   title: {
-    fontSize: "2rem",
-    fontWeight: 700,
-    color: "#fff",
-    marginBottom: "0.5rem",
-    letterSpacing: "-0.02em",
+    margin: 0,
+    color: "#000",
+    fontSize: "2.5rem",
+    lineHeight: 0.96,
+    fontWeight: 800,
+    letterSpacing: "-0.05em",
   },
   subtitle: {
-    color: "#888",
+    margin: "0.75rem 0 0",
+    color: "rgba(0,0,0,0.62)",
     fontSize: "1rem",
   },
-  card: {
-    background: "rgba(255, 255, 255, 0.06)",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
-    borderRadius: 16,
-    padding: "2rem",
-    border: "1px solid rgba(255, 255, 255, 0.12)",
+  panel: {
+    background: "#fff",
+    borderRadius: 3,
+    padding: "1.5rem",
+    border: "1px solid rgba(0,0,0,0.2)",
   },
   label: {
     display: "block",
     marginBottom: "0.5rem",
-    fontWeight: 500,
-    color: "#fff",
-    fontSize: "0.9rem",
+    fontWeight: 700,
+    color: "#000",
+    fontSize: "0.88rem",
   },
   input: {
     width: "100%",
-    padding: "0.75rem 1rem",
-    borderRadius: 12,
-    border: "1px solid rgba(255, 255, 255, 0.2)",
-    background: "rgba(255, 255, 255, 0.06)",
-    color: "#fff",
+    padding: "0.78rem 0.9rem",
+    borderRadius: 3,
+    border: "1px solid rgba(0,0,0,0.24)",
+    background: "#fff",
+    color: "#000",
     fontSize: "1rem",
     marginBottom: "1rem",
     outline: "none",
-    boxSizing: "border-box" as const,
+    boxSizing: "border-box",
   },
   button: {
-    padding: "0.875rem 2rem",
-    borderRadius: 12,
-    border: "1px solid rgba(255, 255, 255, 0.2)",
-    fontWeight: 600,
-    fontSize: "1rem",
+    padding: "0.86rem 1.3rem",
+    borderRadius: 3,
+    border: "1px solid #000",
+    fontWeight: 800,
+    fontSize: "0.96rem",
     cursor: "pointer",
-    transition: "border-color 0.2s, opacity 0.2s",
+    fontFamily: "inherit",
   },
   primaryButton: {
-    background: "#fff",
-    color: "#000",
-    borderColor: "#fff",
+    background: "#000",
+    color: "#fff",
   },
   disabledButton: {
     opacity: 0.5,
     cursor: "not-allowed",
   },
   errorBox: {
-    background: "rgba(239, 68, 68, 0.15)",
-    border: "1px solid rgba(239, 68, 68, 0.3)",
-    borderRadius: 12,
-    padding: "0.75rem 1rem",
+    background: "#fff",
+    border: "1px solid #000",
+    borderRadius: 3,
+    padding: "0.75rem 0.9rem",
     marginBottom: "1rem",
-    color: "#fca5a5",
+    color: "#000",
     fontSize: "0.9rem",
   },
   switchRow: {
@@ -255,17 +244,20 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     alignItems: "center",
     gap: "0.5rem",
-    marginTop: "1.5rem",
+    marginTop: "1.35rem",
     fontSize: "0.9rem",
+  },
+  mutedText: {
+    color: "rgba(0,0,0,0.62)",
   },
   switchButton: {
     background: "none",
     border: "none",
-    color: "#fff",
+    color: "#000",
     textDecoration: "underline",
-    textUnderlineOffset: "2px",
+    textUnderlineOffset: "3px",
     cursor: "pointer",
-    fontWeight: 600,
+    fontWeight: 800,
     fontSize: "0.9rem",
     padding: 0,
   },
