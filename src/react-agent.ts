@@ -12,6 +12,12 @@
  */
 
 import type { PRRequest } from "./types";
+import {
+  LARGE_FILE_THRESHOLD,
+  applySearchReplaceEdits,
+  decodeGitHubFileContent,
+  validateUpdateContent,
+} from "./file-edits";
 
 /** Safe string for prompts/display; Workers AI or clients may send non-string. */
 function safeStr(value: unknown): string {
@@ -156,17 +162,25 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
             path,
             ref
           );
-          let text = "";
-          if (content.content) {
-            text = decodeURIComponent(
-              escape(atob(content.content.replace(/\n/g, "")))
-            );
-          }
-          const isLarge = text.length > 10000;
+          const text = decodeGitHubFileContent(content.content);
+          const isLarge = text.length > LARGE_FILE_THRESHOLD;
           if (isLarge) {
             ctx.addProgress(`File ${path} is very large (${text.length} chars)`);
           }
-          // Always return full content so the agent can apply precise edits.
+          // Large files: return excerpt only so the model can plan apply_file_edits
+          // without blowing the context window. apply_file_edits fetches full content from GitHub.
+          if (isLarge) {
+            const head = text.slice(0, 3000);
+            const tail = text.slice(-1500);
+            return {
+              path,
+              length: text.length,
+              truncated: true,
+              contentExcerpt: `${head}\n\n... [${text.length - 4500} chars omitted — use exact substrings from this excerpt for apply_file_edits] ...\n\n${tail}`,
+              recommendation:
+                "use apply_file_edits instead of commit_files for this file",
+            };
+          }
           return {
             path,
             content: text,
@@ -242,9 +256,106 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
     },
 
     {
+      name: "apply_file_edits",
+      description:
+        "Apply targeted search/replace edits to an EXISTING file and commit the result. PREFERRED for modifying existing files, especially large ones (>8KB). Each edit replaces exactly one occurrence of 'search' with 'replace'. Copy search strings exactly from read_file output.",
+      parameters: {
+        type: "object",
+        properties: {
+          branchName: {
+            type: "string",
+            description: "Branch to commit to",
+          },
+          path: {
+            type: "string",
+            description: "File path to update",
+          },
+          edits: {
+            type: "array",
+            description: "Ordered list of search/replace edits",
+            items: {
+              type: "object",
+              properties: {
+                search: {
+                  type: "string",
+                  description: "Exact substring to find (must match once)",
+                },
+                replace: {
+                  type: "string",
+                  description: "Replacement text",
+                },
+              },
+              required: ["search", "replace"],
+            },
+          },
+        },
+        required: ["branchName", "path", "edits"],
+      },
+      execute: async (rawArgs: {
+        branchName: string;
+        path: string;
+        edits: unknown;
+      }) => {
+        const { branchName, path } = rawArgs;
+        const edits = parseIfStringified<{ search: string; replace: string }>(
+          rawArgs.edits
+        );
+
+        if (!path?.trim()) {
+          throw new Error('"path" must be a non-empty string.');
+        }
+        if (!edits?.length) {
+          throw new Error(
+            '"edits" must be a non-empty JSON array of { search, replace } objects.'
+          );
+        }
+
+        ctx.addProgress(`Applying ${edits.length} edit(s) to ${path}...`);
+
+        const existing = await ctx.github.getFileContent(
+          ctx.repoInfo.owner,
+          ctx.repoInfo.repo,
+          path,
+          branchName
+        );
+        const original = decodeGitHubFileContent(existing.content);
+        if (!original) {
+          throw new Error(
+            `File "${path}" is empty or not found on ${branchName}. Use commit_files with action "create" for new files.`
+          );
+        }
+
+        const merged = applySearchReplaceEdits(original, edits);
+        const validation = validateUpdateContent(original, merged);
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+
+        await ctx.github.createOrUpdateFile(
+          ctx.repoInfo.owner,
+          ctx.repoInfo.repo,
+          path,
+          merged,
+          `update: ${path} - ${safeStr(ctx.request.description).slice(0, 50)}`,
+          branchName,
+          existing.sha
+        );
+
+        ctx.addProgress(`${path} updated successfully via apply_file_edits`);
+        return {
+          success: true,
+          path,
+          editsApplied: edits.length,
+          originalLength: original.length,
+          newLength: merged.length,
+        };
+      },
+    },
+
+    {
       name: "commit_files",
       description:
-        "Commit one or more file changes to a branch. IMPORTANT: For 'update' actions, you MUST include the COMPLETE file content with your modifications added to the existing code. Never delete existing code unless explicitly requested. Read the file first, then modify it, then commit the full modified version.",
+        "Commit one or more file changes to a branch. Use for NEW files or SMALL existing files (<8KB). For larger existing files, use apply_file_edits instead. For 'update' actions on small files, include the COMPLETE file content with modifications.",
       parameters: {
         type: "object",
         properties: {
@@ -336,6 +447,7 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
           );
           try {
             let sha: string | undefined;
+            let existingContent = "";
             if (change.action === "update") {
               try {
                 const existing = await ctx.github.getFileContent(
@@ -345,8 +457,23 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
                   branchName
                 );
                 sha = existing.sha;
+                existingContent = decodeGitHubFileContent(existing.content);
                 ctx.addProgress(`Found existing file ${change.path}, updating...`);
-              } catch {
+
+                const validation = validateUpdateContent(
+                  existingContent,
+                  change.content
+                );
+                if (!validation.valid) {
+                  throw new Error(validation.error);
+                }
+              } catch (e) {
+                if (
+                  e instanceof Error &&
+                  e.message.includes("Update rejected")
+                ) {
+                  throw e;
+                }
                 ctx.addProgress(
                   `File ${change.path} not found on ${branchName}, will create instead`
                 );
@@ -428,7 +555,7 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
           }
           if ((cmp as any).ahead_by <= 0) {
             throw new Error(
-              `No commits between ${base} and ${branchName}. Use commit_files to create at least one commit before creating a PR.`
+              `No commits between ${base} and ${branchName}. Use commit_files or apply_file_edits to create at least one commit before creating a PR.`
             );
           }
         } catch (e) {
@@ -599,29 +726,37 @@ WORKFLOW (follow strictly in order):
 1. Call get_repo_structure("") to list the root. MANDATORY first step.
 2. Optionally explore subdirectories with get_repo_structure if needed.
 3. Call read_file on every file you plan to modify.
-4. Call commit_files ONCE with ALL changes in a single call.
+4. Commit changes:
+   - EXISTING files (especially >8KB): use apply_file_edits with search/replace hunks.
+   - NEW files or small files (<8KB): use commit_files.
 5. Call create_pull_request to open the PR.
 
-COMMIT_FILES FORMAT (most common failure point):
+APPLY_FILE_EDITS FORMAT (preferred for existing files):
+- Each edit: { "search": "exact substring from file", "replace": "new text" }
+- search must match EXACTLY ONCE in the file — copy verbatim from read_file.
+- Example:
+  apply_file_edits({
+    "branchName": "feature/my-change",
+    "path": "app/page.js",
+    "edits": [
+      { "search": "<Box>", "replace": "<Box sx={{ bgcolor: 'black' }}>" }
+    ]
+  })
+
+COMMIT_FILES FORMAT (new or small files only):
 - "changes" MUST be a proper JSON array, NOT a string.
 - Each element: {"path":"file.css","content":"...full file content...","action":"update"}
 - For "update": include the COMPLETE file content (original + your changes).
 - For "create": include the full new file content.
-- Example call:
-  commit_files({
-    "branchName": "feature/my-change",
-    "changes": [
-      {"path": "app/globals.css", "content": "body { background: black; }\\n", "action": "update"}
-    ]
-  })
 
 FILE UPDATE RULES:
 - ALWAYS read_file before modifying. Preserve ALL existing code.
-- Include complete file content in commit_files (existing + modifications).
+- NEVER use "// ..." or placeholder comments — they will be rejected.
+- For large files, read_file returns contentExcerpt + recommendation — use apply_file_edits with exact substrings from the excerpt.
 
 ERROR RECOVERY:
 - If a tool fails, read the error and fix the issue. Do NOT repeat the same failing call.
-- If commit_files fails, check your "changes" format and retry with corrected data.
+- If commit_files is rejected as truncated, switch to apply_file_edits.
 - Do NOT call get_repo_structure more than twice total. You already have the structure.
 - NEVER repeat the same tool call with the same arguments. Try a different approach.
 
@@ -630,7 +765,7 @@ PATH RULES:
 - If read_file returns 404, use get_repo_structure to find the correct path.
 
 PR RULE:
-- Do NOT call create_pull_request until commit_files has succeeded.`;
+- Do NOT call create_pull_request until commit_files or apply_file_edits has succeeded.`;
 
   const userPrompt = `Create a pull request for this repository.
 
@@ -670,7 +805,7 @@ Start by exploring the repository structure, then implement the changes, commit 
       const result = await callModelWithRetry(env.AI, REACT_MODEL_ID, {
         messages,
         tools: toolSpecs,
-        max_tokens: 4096,
+        max_tokens: 8192,
       });
 
       const responseText =
@@ -715,7 +850,8 @@ Start by exploring the repository structure, then implement the changes, commit 
           content:
             `SYSTEM: You are stuck in a loop calling ${toolCalls[0]?.name} repeatedly. ` +
             `STOP calling it again. Instead:\n` +
-            `- If you need to modify a file, call read_file to get its content, then call commit_files.\n` +
+            `- If you need to modify a file, use apply_file_edits (existing files) or read_file then commit_files (new/small files).\n` +
+            `- If commit_files was rejected as truncated, use apply_file_edits with exact search/replace hunks.\n` +
             `- If commit_files previously failed, check that "changes" is a proper JSON array of objects, each with "path", "content", and "action" keys.\n` +
             `- If you have already committed files, call create_pull_request.\n` +
             `- Do NOT call get_repo_structure again — you already have the structure.`,

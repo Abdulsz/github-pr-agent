@@ -26,3 +26,6 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+
+# Local architecture notes (agent context, not committed)
+architecture-decisions.md
