@@ -36,11 +36,15 @@ export function FeedbackWidget({
   const {
     theme = "light",
     position = "bottom-right",
-    primaryColor = "#007bff",
-    title: widgetTitle = "Send us your feedback",
+    primaryColor = "#000000",
+    title: widgetTitle = "Send feedback",
   } = config;
 
   const isDark = theme === "dark";
+  const containerBg = isDark ? "#000" : "#fff";
+  const textColor = isDark ? "#fff" : "#000";
+  const borderColor = isDark ? "rgba(255,255,255,0.24)" : "rgba(0,0,0,0.24)";
+  const inputBg = isDark ? "#000" : "#fff";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -87,12 +91,6 @@ export function FeedbackWidget({
     }
   }
 
-  const containerBg = isDark ? "#1f2937" : "#fff";
-  const textColor = isDark ? "#f3f4f6" : "#111827";
-  const borderColor = isDark ? "#374151" : "#e5e7eb";
-  const inputBg = isDark ? "#374151" : "#fff";
-  const inputBorder = isDark ? "#4b5563" : "#d1d5db";
-
   return (
     <div style={{ position: "fixed", zIndex: 9999, ...positionMap[position] }}>
       {!isOpen ? (
@@ -102,8 +100,8 @@ export function FeedbackWidget({
           style={{
             width: 56,
             height: 56,
-            borderRadius: "50%",
-            border: "none",
+            borderRadius: 3,
+            border: `1px solid ${isDark ? "#fff" : "#000"}`,
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
@@ -111,30 +109,29 @@ export function FeedbackWidget({
             fontSize: 24,
             backgroundColor: primaryColor,
             color: "#fff",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            boxShadow: "none",
             transition: "transform 0.2s",
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.1)")}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+          onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
+          onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
         >
-          {"💬"}
+          +
         </button>
       ) : (
         <div
           style={{
             background: containerBg,
-            borderRadius: 12,
-            boxShadow: "0 5px 40px rgba(0,0,0,0.16)",
+            borderRadius: 3,
+            border: `1px solid ${borderColor}`,
+            boxShadow: "none",
             width: 360,
             maxHeight: 600,
             display: "flex",
             flexDirection: "column",
             color: textColor,
-            fontFamily:
-              '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
           }}
         >
-          {/* Header */}
           <div
             style={{
               padding: 16,
@@ -144,28 +141,27 @@ export function FeedbackWidget({
               alignItems: "center",
             }}
           >
-            <span style={{ fontWeight: 600, fontSize: 16 }}>{widgetTitle}</span>
+            <span style={{ fontWeight: 700, fontSize: 16 }}>{widgetTitle}</span>
             <button
               onClick={() => setIsOpen(false)}
               style={{
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                fontSize: 20,
+                fontSize: 18,
                 padding: 0,
                 color: textColor,
                 lineHeight: 1,
               }}
             >
-              {"✕"}
+              x
             </button>
           </div>
 
-          {/* Body */}
           {submitted ? (
             <div style={{ padding: "32px 16px", textAlign: "center" }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>{"✅"}</div>
-              <p style={{ margin: 0, fontWeight: 500 }}>Thanks for your feedback!</p>
+              <div style={{ fontSize: 24, marginBottom: 8, fontWeight: 800 }}>OK</div>
+              <p style={{ margin: 0, fontWeight: 600 }}>Thanks for your feedback.</p>
             </div>
           ) : (
             <form
@@ -185,8 +181,8 @@ export function FeedbackWidget({
                 required
                 style={{
                   padding: "8px 12px",
-                  border: `1px solid ${inputBorder}`,
-                  borderRadius: 6,
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: 3,
                   fontSize: 14,
                   background: inputBg,
                   color: textColor,
@@ -203,14 +199,14 @@ export function FeedbackWidget({
                 rows={4}
                 style={{
                   padding: "8px 12px",
-                  border: `1px solid ${inputBorder}`,
-                  borderRadius: 6,
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: 3,
                   fontSize: 14,
                   fontFamily: "inherit",
                   background: inputBg,
                   color: textColor,
                   outline: "none",
-                  resize: "vertical" as const,
+                  resize: "vertical",
                   boxSizing: "border-box",
                   width: "100%",
                 }}
@@ -222,8 +218,8 @@ export function FeedbackWidget({
                 onChange={(e) => setEmail(e.target.value)}
                 style={{
                   padding: "8px 12px",
-                  border: `1px solid ${inputBorder}`,
-                  borderRadius: 6,
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: 3,
                   fontSize: 14,
                   background: inputBg,
                   color: textColor,
@@ -233,26 +229,24 @@ export function FeedbackWidget({
                 }}
               />
 
-              {error && (
-                <p style={{ margin: 0, color: "#ef4444", fontSize: 13 }}>{error}</p>
-              )}
+              {error && <p style={{ margin: 0, color: textColor, fontSize: 13 }}>{error}</p>}
 
               <button
                 type="submit"
                 disabled={loading}
                 style={{
                   padding: "8px 16px",
-                  border: "none",
-                  borderRadius: 6,
+                  border: `1px solid ${isDark ? "#fff" : "#000"}`,
+                  borderRadius: 3,
                   color: "#fff",
-                  fontWeight: 600,
+                  fontWeight: 700,
                   fontSize: 14,
                   cursor: loading ? "not-allowed" : "pointer",
                   backgroundColor: primaryColor,
                   opacity: loading ? 0.6 : 1,
                 }}
               >
-                {loading ? "Sending..." : "Send Feedback"}
+                {loading ? "Sending..." : "Send feedback"}
               </button>
             </form>
           )}

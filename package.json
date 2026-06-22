@@ -9,7 +9,8 @@
     "dev:server": "wrangler dev --port 8787",
     "build": "vite build",
     "deploy": "npm run build && wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/file-edits.test.ts"
   },
   "keywords": [
     "cloudflare",
@@ -39,6 +40,7 @@
     "@types/node": "^25.2.3",
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "tsx": "^4.22.4"
   }
 }

@@ -2,6 +2,11 @@ import { Agent, routeAgentRequest, callable } from "agents";
 import type { Env, AgentState, PRRequest, FileChange, PRResult, ExecutionPlan, PlanStep } from "./types";
 import { runReActAgent } from "./react-agent";
 import { handleFeedbackRoutes } from "./feedback/routes";
+import {
+  decodeGitHubFileContent,
+  hasPlaceholderContent,
+  validateUpdateContent,
+} from "./file-edits";
 
 // Structured plan step IDs for PR creation (order defines execution)
 const PLAN_STEP_IDS = [
@@ -44,7 +49,21 @@ function setStepStatus(
   return { ...plan, steps, currentStepIndex: stepIndex };
 }
 
-// GitHub API response types
+function resolveAgentHttpPath(pathname: string): string {
+  const routes = [
+    "/createPRReAct",
+    "/createPR",
+    "/setGitHubToken",
+    "/disconnect",
+    "/reset",
+    "/status",
+  ];
+  for (const route of routes) {
+    if (pathname === route || pathname.endsWith(route)) return route;
+  }
+  return pathname;
+}
+
 interface GitHubUser {
   login: string;
   id: number;
@@ -223,13 +242,14 @@ export class GitHubPRAgent extends Agent<Env, AgentState> {
   // This supports internal Worker calls via `stub.fetch("https://agent/...")`.
   async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const path = resolveAgentHttpPath(url.pathname);
     const json = (body: unknown, status = 200) =>
       new Response(JSON.stringify(body), {
         status,
         headers: { "Content-Type": "application/json" },
       });
 
-    if (request.method === "GET" && url.pathname === "/status") {
+    if (request.method === "GET" && path === "/status") {
       return json(await this.getStatus());
     }
 
@@ -246,7 +266,7 @@ export class GitHubPRAgent extends Agent<Env, AgentState> {
 
     const args = Array.isArray(body.args) ? body.args : [];
 
-    if (url.pathname === "/setGitHubToken") {
+    if (path === "/setGitHubToken") {
       const token = args[0];
       if (typeof token !== "string" || !token.trim()) {
         return json({ error: "Expected args[0] to be a non-empty token string" }, 400);
@@ -254,7 +274,7 @@ export class GitHubPRAgent extends Agent<Env, AgentState> {
       return json(await this.setGitHubToken(token));
     }
 
-    if (url.pathname === "/createPR") {
+    if (path === "/createPR") {
       const req = args[0];
       if (!req || typeof req !== "object") {
         return json({ error: "Expected args[0] to be a PR request object" }, 400);
@@ -262,7 +282,7 @@ export class GitHubPRAgent extends Agent<Env, AgentState> {
       return json(await this.createPR(req as PRRequest));
     }
 
-    if (url.pathname === "/createPRReAct") {
+    if (path === "/createPRReAct") {
       const req = args[0];
       if (!req || typeof req !== "object") {
         return json({ error: "Expected args[0] to be a PR request object" }, 400);
@@ -270,12 +290,12 @@ export class GitHubPRAgent extends Agent<Env, AgentState> {
       return json(await this.createPRReAct(req as PRRequest));
     }
 
-    if (url.pathname === "/reset") {
+    if (path === "/reset") {
       await this.reset();
       return json({ success: true });
     }
 
-    if (url.pathname === "/disconnect") {
+    if (path === "/disconnect") {
       return json(await this.disconnect());
     }
 
@@ -416,6 +436,12 @@ export class GitHubPRAgent extends Agent<Env, AgentState> {
       }
       if (typeof obj.content !== "string") {
         return { valid: false, error: `Item ${i + 1}: "content" must be a string.` };
+      }
+      if (hasPlaceholderContent(obj.content)) {
+        return {
+          valid: false,
+          error: `Item ${i + 1}: content appears to be a placeholder stub (e.g. "// ..."). Output the full file content or use targeted edits.`,
+        };
       }
       if (!validActions.includes(obj.action as string)) {
         return {
@@ -733,7 +759,24 @@ Output ONLY the JSON array. Start with [ end with ]`;
                 branchName
               );
               sha = existingFile.sha;
-            } catch {
+              const existingContent = decodeGitHubFileContent(existingFile.content);
+              if (existingContent) {
+                const validation = validateUpdateContent(
+                  existingContent,
+                  change.content
+                );
+                if (!validation.valid) {
+                  throw new Error(validation.error);
+                }
+              }
+            } catch (e) {
+              if (
+                e instanceof Error &&
+                (e.message.includes("Update rejected") ||
+                  e.message.includes("placeholder stub"))
+              ) {
+                throw e;
+              }
               // File doesn't exist, will create
             }
           }

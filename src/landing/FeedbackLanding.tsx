@@ -1,96 +1,21 @@
 import { useState } from "react";
 
 const NPM = "npm install @devfeedback/react-widget";
-
 const fontBody = '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif';
 
 const theme = {
-  bg: "#000000",
-  bgElevated: "#111111",
-  panel: "#161616",
-  panelAlt: "#1d1d1d",
-  line: "#2a2a2a",
-  text: "#f5f1e8",
-  textMuted: "rgba(245, 241, 232, 0.62)",
-  textSoft: "rgba(245, 241, 232, 0.74)",
-  sand: "#c8a977",
-  sage: "#6f8f84",
-  white: "#f5f1e8",
-  dark: "#111111",
+  black: "#000000",
+  white: "#ffffff",
+  accent: "#d7ff3f",
+  line: "rgba(255,255,255,0.22)",
+  lineDark: "rgba(0,0,0,0.16)",
+  muted: "rgba(255,255,255,0.68)",
+  soft: "rgba(255,255,255,0.08)",
+  inkMuted: "rgba(0,0,0,0.62)",
 } as const;
 
-const workflow = [
-  {
-    label: "Widget",
-    title: "Customer report lands in-app",
-    meta: "checkout bug · mobile safari",
-    tone: theme.sage,
-  },
-  {
-    label: "AI Route",
-    title: "Technical issue auto-classified",
-    meta: "bug · engineering queue",
-    tone: theme.sand,
-  },
-  {
-    label: "Inbox",
-    title: "Team triages in one queue",
-    meta: "pending -> in progress",
-    tone: theme.sand,
-  },
-  {
-    label: "PR",
-    title: "Ready for GitHub handoff",
-    meta: "branch + PR link attached",
-    tone: theme.sage,
-  },
-] as const;
-
-const proofItems = [
-  "Technical vs non-technical routing",
-  "Project-scoped API keys",
-  "Auto-PR for engineering feedback",
-  "Embeddable widget for any app",
-] as const;
-
-const systemSteps = [
-  {
-    id: "01",
-    title: "Collect signal at the source",
-    body: "Drop a lightweight widget into your app so customers can report bugs, requests, and friction without leaving the product.",
-  },
-  {
-    id: "02",
-    title: "Separate noise from engineering work",
-    body: "Classify submissions into technical and non-technical lanes so product triage and engineering follow-up stop competing for the same inbox.",
-  },
-  {
-    id: "03",
-    title: "Route action to the right system",
-    body: "Keep non-technical feedback in the queue and send engineering-ready issues toward GitHub when auto-PR is enabled.",
-  },
-] as const;
-
-const queueRows = [
-  {
-    title: "Bug: checkout timeout on iOS",
-    tag: "technical",
-    status: "PR ready",
-    tone: theme.sage,
-  },
-  {
-    title: "Request: add saved filters",
-    tag: "non-technical",
-    status: "triage",
-    tone: theme.sand,
-  },
-  {
-    title: "Improvement: clarify trial limits",
-    tag: "non-technical",
-    status: "pending",
-    tone: theme.sand,
-  },
-] as const;
+const routes = ["Widget", "AI route", "Inbox", "GitHub PR"] as const;
+const proof = ["Embedded widget", "AI classification", "Team inbox", "Optional auto-PR"] as const;
 
 export function FeedbackLanding({
   onSignIn,
@@ -104,177 +29,110 @@ export function FeedbackLanding({
   function copyInstall() {
     void navigator.clipboard.writeText(NPM);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 1600);
   }
 
   return (
     <div style={styles.page}>
+      <style>{motionCss}</style>
       <header style={styles.nav}>
-        <div style={styles.brandWrap}>
-          <span style={styles.brand}>DevFeedback</span>
-          <span style={styles.brandTag}>AI feedback ops</span>
-        </div>
-        <div style={styles.navActions}>
-          <button type="button" onClick={onOpenAgent} style={styles.navGhost}>
+        <button type="button" onClick={onSignIn} style={styles.brandButton}>
+          DevFeedback
+        </button>
+        <nav style={styles.navActions}>
+          <button type="button" onClick={onOpenAgent} style={styles.navLink}>
             PR Agent
           </button>
           <button type="button" onClick={onSignIn} style={styles.navPrimary}>
             Dashboard
           </button>
-        </div>
+        </nav>
       </header>
 
       <main>
-        <section style={styles.hero}>
-          <div style={styles.heroCopy}>
-            <div style={styles.kickerRow}>
-              <span style={styles.kickerDot} />
-              <span style={styles.kicker}>AI Feedback Ops</span>
-            </div>
-
-            <h1 style={styles.h1}>Turn user feedback into shipped work.</h1>
+        <section style={styles.hero} className="df-hero-grid">
+          <svg
+            aria-hidden="true"
+            className="df-hero-signal"
+            viewBox="0 0 1440 824"
+            preserveAspectRatio="none"
+            style={styles.heroSignalArt}
+          >
+            <path
+              d="M104 768 H342 V712 H548 V648 H802 V590 H1090"
+              style={styles.signalPathAccent}
+            />
+            <circle cx="342" cy="712" r="5" style={styles.signalNodeAccent} />
+            <circle cx="548" cy="648" r="5" style={styles.signalNodeAccent} />
+            <circle cx="802" cy="590" r="5" style={styles.signalNodeAccent} />
+            <circle cx="1090" cy="590" r="5" style={styles.signalNodeAccent} />
+          </svg>
+          <div style={styles.heroCopy} className="df-enter df-hero-copy">
+            <p style={styles.kicker}>Feedback ops for product teams</p>
+            <h1 style={styles.h1} className="df-h1">
+              DevFeedback turns product feedback into engineering work.
+            </h1>
             <p style={styles.lead}>
-              Embed a lightweight widget, separate technical from non-technical submissions, triage
-              everything in one inbox, and route engineering-ready feedback toward GitHub without
-              losing context.
+              Collect reports in-app, classify them as technical/non-technical with AI, and move technical feedback toward a pull request.
             </p>
-
             <div style={styles.heroActions}>
               <button type="button" onClick={onSignIn} style={styles.btnPrimary}>
                 Open dashboard
               </button>
               <button type="button" onClick={onOpenAgent} style={styles.btnSecondary}>
-                GitHub PR Agent
+                Try PR Agent
               </button>
             </div>
+          </div>
 
-            <div style={styles.proofRow}>
-              {proofItems.map((item) => (
-                <span key={item} style={styles.proofPill}>
+          <div style={styles.signalBoard} className="df-enter df-delay df-signal-board">
+            <div style={styles.boardHeader}>
+              <span>Signal pipeline</span>
+              <span>Live</span>
+            </div>
+            <div style={styles.signalRail}>
+              {routes.map((route, index) => (
+                <div key={route} style={styles.routeStep}>
+                  <span style={styles.routeIndex}>{String(index + 1).padStart(2, "0")}</span>
+                  <span style={styles.routeName}>{route}</span>
+                </div>
+              ))}
+            </div>
+            <div style={styles.ticket}>
+              <div>
+                <span style={styles.ticketLabel}>technical</span>
+                <h2 style={styles.ticketTitle}>Checkout breaks on mobile Safari</h2>
+              </div>
+              <div style={styles.ticketMeta}>
+                <span>classified</span>
+                <span>branch ready</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section style={styles.whiteSection}>
+          <div style={styles.sectionGrid} className="df-section-grid">
+            <div>
+              <p style={styles.sectionLabelDark}>What it does</p>
+              <h2 style={styles.sectionTitleDark}>One loop from customer report to team action.</h2>
+            </div>
+            <div style={styles.proofList}>
+              {proof.map((item) => (
+                <div key={item} style={styles.proofItem}>
                   {item}
-                </span>
+                </div>
               ))}
             </div>
           </div>
-
-          <div style={styles.heroVisual}>
-            <div style={styles.visualFrame}>
-              <div style={styles.visualTopLine} />
-
-              <div style={styles.commandBar}>
-                <span style={styles.commandLabel}>Live pipeline</span>
-                <div style={styles.commandMetrics}>
-                  <span style={styles.metricBadgeBlue}>42 technical</span>
-                  <span style={styles.metricBadgeMint}>12 PR ready</span>
-                </div>
-              </div>
-
-              <div style={styles.workflowRail}>
-                {workflow.map((step, index) => (
-                  <div key={step.label} style={styles.workflowCard}>
-                    <div style={styles.workflowHead}>
-                      <span style={{ ...styles.workflowChip, color: step.tone, borderColor: `${step.tone}44` }}>
-                        {step.label}
-                      </span>
-                      <span style={styles.workflowIndex}>0{index + 1}</span>
-                    </div>
-                    <div style={styles.workflowTitle}>{step.title}</div>
-                    <div style={styles.workflowMeta}>{step.meta}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={styles.visualGrid}>
-                <section style={styles.queuePanel}>
-                  <div style={styles.panelHead}>
-                    <div>
-                      <div style={styles.panelEyebrow}>Feedback inbox</div>
-                      <div style={styles.panelTitle}>Technical and product signal in one queue</div>
-                    </div>
-                    <span style={styles.panelBadge}>Live triage</span>
-                  </div>
-
-                  <div style={styles.filterRow}>
-                    <span style={styles.filterChipActive}>All</span>
-                    <span style={styles.filterChip}>Technical</span>
-                    <span style={styles.filterChip}>Non-technical</span>
-                  </div>
-
-                  <div style={styles.queueList}>
-                    {queueRows.map((row) => (
-                      <div key={row.title} style={styles.queueRow}>
-                        <span style={{ ...styles.queueDot, background: row.tone }} />
-                        <div style={styles.queueText}>
-                          <div style={styles.queueTitle}>{row.title}</div>
-                          <div style={styles.queueMeta}>{row.tag}</div>
-                        </div>
-                        <span style={styles.queueStatus}>{row.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                <aside style={styles.sideStack}>
-                  <div style={styles.classifierPanel}>
-                    <div style={styles.panelEyebrow}>AI route</div>
-                    <div style={styles.classifierItem}>
-                      <span style={styles.classifierKey}>Type</span>
-                      <span style={styles.classifierValueSage}>technical</span>
-                    </div>
-                    <div style={styles.classifierItem}>
-                      <span style={styles.classifierKey}>Category</span>
-                      <span style={styles.classifierValue}>bug</span>
-                    </div>
-                    <div style={styles.classifierItem}>
-                      <span style={styles.classifierKey}>Path</span>
-                      <span style={styles.classifierValueSand}>engineering queue</span>
-                    </div>
-                  </div>
-
-                  <div style={styles.prPanel}>
-                    <div style={styles.panelEyebrowDark}>GitHub handoff</div>
-                    <div style={styles.prTitle}>Auto-PR enabled</div>
-                    <div style={styles.prCode}>fix/checkout-timeout-ios</div>
-                    <div style={styles.prMeta}>PR #184 linked to feedback thread</div>
-                  </div>
-                </aside>
-              </div>
-            </div>
-          </div>
         </section>
 
-        <section style={styles.systemSection}>
-          <div style={styles.sectionIntro}>
-            <div style={styles.sectionLabel}>System flow</div>
-            <h2 style={styles.sectionTitle}>Built for the feedback loop between product and engineering.</h2>
-            <p style={styles.sectionBody}>
-              The landing page should sell the operating model, not just list features. DevFeedback
-              works when raw customer reports become a routed queue with a clear next action.
-            </p>
-          </div>
-
-          <div style={styles.stepGrid}>
-            {systemSteps.map((step) => (
-              <article key={step.id} style={styles.stepCard}>
-                <div style={styles.stepId}>{step.id}</div>
-                <h3 style={styles.stepTitle}>{step.title}</h3>
-                <p style={styles.stepBody}>{step.body}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section style={styles.installSection}>
-          <div style={styles.installCard}>
+        <section style={styles.blackSection}>
+          <div style={styles.installLayout} className="df-section-grid">
             <div>
-              <div style={styles.sectionLabel}>Developer setup</div>
-              <h2 style={styles.sectionTitle}>Embed the widget and start collecting signal.</h2>
-              <p style={styles.sectionBody}>
-                Use the React package with a project API key from the dashboard. Same-origin works
-                out of the box, and deployed hosts can be configured in widget options.
-              </p>
+              <p style={styles.sectionLabel}>Install</p>
+              <h2 style={styles.sectionTitle}>Add the widget, then triage from the dashboard.</h2>
             </div>
-
             <div style={styles.codeRow}>
               <code style={styles.code}>{NPM}</code>
               <button type="button" onClick={copyInstall} style={styles.copyBtn}>
@@ -283,546 +141,393 @@ export function FeedbackLanding({
             </div>
           </div>
         </section>
+
+        <section style={styles.finalCta}>
+          <h2 style={styles.finalTitle}>Start with the feedback already inside your product.</h2>
+          <button type="button" onClick={onSignIn} style={styles.finalButton}>
+            Open DevFeedback
+          </button>
+        </section>
       </main>
     </div>
   );
 }
 
+const motionCss = `
+@keyframes dfUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.df-enter { animation: dfUp 520ms ease both; }
+.df-delay { animation-delay: 120ms; }
+.df-hero-signal { animation: dfSignal 900ms ease both; }
+@keyframes dfSignal {
+  from { opacity: 0; stroke-dashoffset: 90; }
+  to { opacity: 1; stroke-dashoffset: 0; }
+}
+button:hover { transform: translateY(-1px); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .df-enter { animation: none; }
+  .df-hero-signal { animation: none; }
+  button { transition: none !important; }
+}
+@media (max-width: 860px) {
+  .df-hero-grid { grid-template-columns: 1fr !important; grid-template-rows: auto !important; }
+  .df-hero-copy { align-self: start !important; }
+  .df-section-grid { grid-template-columns: 1fr !important; }
+  .df-signal-board { min-height: 420px !important; }
+}
+@media (max-width: 560px) {
+  .df-hero-grid { padding-left: 20px !important; padding-right: 20px !important; }
+  .df-signal-board { padding: 12px !important; }
+}
+@media (max-height: 860px) {
+  .df-h1 { font-size: clamp(3.45rem, min(6.6vw, 9.6svh), 6.25rem) !important; line-height: 0.92 !important; }
+  .df-hero-grid { padding-top: clamp(20px, 3vw, 36px) !important; }
+}
+@media (max-height: 720px) {
+  .df-h1 { font-size: clamp(2.9rem, min(5.6vw, 8.2svh), 4.8rem) !important; }
+}
+`;
+
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100svh",
-    position: "relative",
-    overflow: "hidden",
-    background: theme.bg,
-    color: theme.text,
+    background: theme.black,
+    color: theme.white,
     fontFamily: fontBody,
   },
   nav: {
-    position: "relative",
-    zIndex: 1,
-    maxWidth: 1240,
-    margin: "0 auto",
-    padding: "1.15rem 1.5rem",
+    height: 76,
+    padding: "0 32px",
     display: "flex",
+    alignItems: "center",
     justifyContent: "space-between",
-    alignItems: "center",
-    gap: 16,
+    borderBottom: `1px solid ${theme.line}`,
   },
-  brandWrap: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    flexWrap: "wrap" as const,
-  },
-  brand: {
-    fontSize: "1.05rem",
+  brandButton: {
+    border: 0,
+    background: "transparent",
+    color: theme.white,
+    fontFamily: "inherit",
+    fontSize: "1rem",
     fontWeight: 800,
-    letterSpacing: "-0.03em",
-  },
-  brandTag: {
-    color: theme.textMuted,
-    fontSize: "0.78rem",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.16em",
+    cursor: "pointer",
   },
   navActions: {
     display: "flex",
     alignItems: "center",
     gap: 10,
   },
-  navGhost: {
+  navLink: {
     border: `1px solid ${theme.line}`,
-    background: theme.bgElevated,
-    color: theme.text,
-    padding: "0.78rem 1rem",
-    borderRadius: 12,
+    background: "transparent",
+    color: theme.white,
+    borderRadius: 3,
+    padding: "10px 14px",
+    fontFamily: "inherit",
     fontWeight: 700,
     cursor: "pointer",
-    fontFamily: fontBody,
+    transition: "transform 160ms ease",
   },
   navPrimary: {
-    border: "none",
+    border: `1px solid ${theme.white}`,
     background: theme.white,
-    color: theme.dark,
-    padding: "0.78rem 1rem",
-    borderRadius: 12,
+    color: theme.black,
+    borderRadius: 3,
+    padding: "10px 14px",
+    fontFamily: "inherit",
     fontWeight: 800,
     cursor: "pointer",
-    fontFamily: fontBody,
+    transition: "transform 160ms ease",
   },
   hero: {
     position: "relative",
-    zIndex: 1,
-    maxWidth: 1240,
-    margin: "0 auto",
-    padding: "2.5rem 1.5rem 3rem",
+    minHeight: "calc(100svh - 76px)",
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1.02fr) minmax(0, 1fr)",
-    gap: "2rem",
-    alignItems: "center",
+    gridTemplateColumns: "minmax(0, 0.94fr) minmax(340px, 0.72fr)",
+    gridTemplateRows: "1fr",
+    gap: "clamp(32px, 6vw, 88px)",
+    alignItems: "start",
+    padding: "clamp(24px, 4vw, 48px) 32px clamp(28px, 4vw, 56px)",
+    overflow: "hidden",
+    isolation: "isolate",
+  },
+  heroSignalArt: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    zIndex: 0,
+    pointerEvents: "none",
+    opacity: 0.72,
   },
   heroCopy: {
-    maxWidth: 580,
-  },
-  kickerRow: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: "1rem",
-  },
-  kickerDot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    background: theme.sage,
+    maxWidth: 820,
+    alignSelf: "center",
+    position: "relative",
+    zIndex: 1,
   },
   kicker: {
-    color: theme.textMuted,
-    fontSize: "0.8rem",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.18em",
-    fontWeight: 700,
+    margin: "0 0 14px",
+    color: theme.muted,
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
+    fontSize: "0.78rem",
+    fontWeight: 800,
   },
   h1: {
     margin: 0,
-    fontFamily: fontBody,
-    fontSize: "clamp(2.9rem, 7vw, 5.6rem)",
-    lineHeight: 0.95,
-    letterSpacing: "-0.06em",
-    maxWidth: 540,
+    maxWidth: 820,
+    fontSize: "clamp(3.4rem, min(7vw, 9.5svh), 6.5rem)",
+    lineHeight: 0.92,
+    letterSpacing: "-0.05em",
+    fontWeight: 800,
   },
   lead: {
-    margin: "1.3rem 0 0 0",
-    color: theme.textSoft,
-    fontSize: "1.08rem",
-    lineHeight: 1.7,
+    margin: "18px 0 0",
     maxWidth: 520,
+    color: theme.muted,
+    fontSize: "clamp(0.9rem, 1.1vw, 1.02rem)",
+    lineHeight: 1.5,
   },
   heroActions: {
     display: "flex",
+    flexWrap: "wrap",
     gap: 12,
-    flexWrap: "wrap" as const,
-    marginTop: "2rem",
+    marginTop: 20,
   },
   btnPrimary: {
-    border: "none",
-    background: theme.sand,
-    color: "#120f0a",
-    padding: "0.95rem 1.2rem",
-    borderRadius: 12,
-    fontSize: "0.95rem",
+    border: `1px solid ${theme.white}`,
+    background: theme.white,
+    color: theme.black,
+    borderRadius: 3,
+    padding: "14px 18px",
+    fontFamily: "inherit",
     fontWeight: 800,
     cursor: "pointer",
-    fontFamily: fontBody,
+    transition: "transform 160ms ease",
   },
   btnSecondary: {
     border: `1px solid ${theme.line}`,
-    background: theme.panel,
-    color: theme.text,
-    padding: "0.95rem 1.2rem",
-    borderRadius: 12,
-    fontSize: "0.95rem",
-    fontWeight: 700,
+    background: "transparent",
+    color: theme.white,
+    borderRadius: 3,
+    padding: "14px 18px",
+    fontFamily: "inherit",
+    fontWeight: 800,
     cursor: "pointer",
-    fontFamily: fontBody,
+    transition: "transform 160ms ease",
   },
-  proofRow: {
-    display: "flex",
-    flexWrap: "wrap" as const,
-    gap: 10,
-    marginTop: "1.5rem",
-  },
-  proofPill: {
-    padding: "0.56rem 0.8rem",
-    borderRadius: 999,
-    border: `1px solid ${theme.line}`,
-    background: theme.bgElevated,
-    color: theme.textMuted,
-    fontSize: "0.82rem",
-    lineHeight: 1.2,
-  },
-  heroVisual: {
-    minWidth: 0,
-  },
-  visualFrame: {
-    position: "relative",
-    borderRadius: 28,
-    padding: "1rem",
-    background: theme.panel,
-    border: `1px solid ${theme.line}`,
-    overflow: "hidden",
-  },
-  visualTopLine: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 1,
-    background: "linear-gradient(90deg, rgba(111,143,132,0) 0%, rgba(200,169,119,0.9) 50%, rgba(111,143,132,0) 100%)",
-  },
-  commandBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    padding: "0.2rem 0 1rem",
-    flexWrap: "wrap" as const,
-  },
-  commandLabel: {
-    color: theme.textMuted,
-    fontSize: "0.78rem",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.16em",
-    fontWeight: 700,
-  },
-  commandMetrics: {
-    display: "flex",
-    gap: 8,
-    flexWrap: "wrap" as const,
-  },
-  metricBadgeBlue: {
-    padding: "0.42rem 0.6rem",
-    borderRadius: 999,
-    background: "rgba(111,143,132,0.14)",
-    border: "1px solid rgba(111,143,132,0.26)",
-    color: theme.sage,
-    fontSize: "0.78rem",
-    fontWeight: 700,
-  },
-  metricBadgeMint: {
-    padding: "0.42rem 0.6rem",
-    borderRadius: 999,
-    background: "rgba(200,169,119,0.14)",
-    border: "1px solid rgba(200,169,119,0.26)",
-    color: theme.sand,
-    fontSize: "0.78rem",
-    fontWeight: 700,
-  },
-  workflowRail: {
-    display: "grid",
-    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-    gap: 10,
-    marginBottom: "1rem",
-  },
-  workflowCard: {
-    padding: "0.9rem",
-    borderRadius: 18,
-    border: `1px solid ${theme.line}`,
-    background: theme.panelAlt,
-    minWidth: 0,
-  },
-  workflowHead: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 10,
-  },
-  workflowChip: {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "0.26rem 0.45rem",
-    border: "1px solid",
-    borderRadius: 999,
-    fontSize: "0.72rem",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.08em",
-    fontWeight: 700,
-  },
-  workflowIndex: {
-    color: theme.textMuted,
-    fontSize: "0.75rem",
-  },
-  workflowTitle: {
-    fontSize: "0.86rem",
-    fontWeight: 700,
-    lineHeight: 1.35,
-  },
-  workflowMeta: {
-    marginTop: 8,
-    color: theme.textMuted,
-    fontSize: "0.77rem",
-    lineHeight: 1.4,
-  },
-  visualGrid: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1.2fr) minmax(200px, 0.72fr)",
-    gap: 12,
-  },
-  queuePanel: {
-    borderRadius: 22,
-    background: theme.bgElevated,
-    color: theme.text,
-    padding: "1rem",
-    minWidth: 0,
-  },
-  panelHead: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-    marginBottom: "0.9rem",
-    flexWrap: "wrap" as const,
-  },
-  panelEyebrow: {
-    fontSize: "0.74rem",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.16em",
-    color: theme.textMuted,
-    fontWeight: 800,
-  },
-  panelTitle: {
-    marginTop: 6,
-    fontSize: "1rem",
-    fontWeight: 800,
-    lineHeight: 1.2,
-    letterSpacing: "-0.03em",
-  },
-  panelBadge: {
-    padding: "0.36rem 0.58rem",
-    borderRadius: 999,
-    background: "rgba(111,143,132,0.14)",
-    color: theme.sage,
-    fontSize: "0.72rem",
-    fontWeight: 800,
-    whiteSpace: "nowrap" as const,
-  },
-  filterRow: {
-    display: "flex",
-    gap: 8,
-    flexWrap: "wrap" as const,
-    marginBottom: "0.85rem",
-  },
-  filterChipActive: {
-    padding: "0.4rem 0.65rem",
-    borderRadius: 999,
-    background: theme.sand,
-    color: "#120f0a",
-    fontSize: "0.78rem",
-    fontWeight: 700,
-  },
-  filterChip: {
-    padding: "0.4rem 0.65rem",
-    borderRadius: 999,
-    background: theme.panelAlt,
-    color: theme.textMuted,
-    fontSize: "0.78rem",
-    fontWeight: 700,
-  },
-  queueList: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 10,
-  },
-  queueRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    padding: "0.8rem 0",
-    borderBottom: `1px solid ${theme.line}`,
-  },
-  queueDot: {
-    width: 10,
-    height: 10,
-    borderRadius: "50%",
-    flexShrink: 0,
-  },
-  queueText: {
-    minWidth: 0,
-    flex: 1,
-  },
-  queueTitle: {
-    fontSize: "0.88rem",
-    fontWeight: 700,
-    lineHeight: 1.3,
-  },
-  queueMeta: {
-    marginTop: 4,
-    color: theme.textMuted,
-    fontSize: "0.76rem",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.08em",
-  },
-  queueStatus: {
-    color: theme.textMuted,
-    fontSize: "0.76rem",
-    fontWeight: 700,
-    whiteSpace: "nowrap" as const,
-  },
-  sideStack: {
-    display: "flex",
-    flexDirection: "column" as const,
-    gap: 12,
-  },
-  classifierPanel: {
-    borderRadius: 20,
-    background: theme.bgElevated,
-    border: `1px solid ${theme.line}`,
-    padding: "1rem",
-  },
-  classifierItem: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 12,
-    padding: "0.55rem 0",
-    borderBottom: "1px solid rgba(255,255,255,0.06)",
-    fontSize: "0.84rem",
-  },
-  classifierKey: {
-    color: theme.textMuted,
-  },
-  classifierValue: {
-    color: theme.text,
-    fontWeight: 700,
-  },
-  classifierValueSage: {
-    color: theme.sage,
-    fontWeight: 700,
-  },
-  classifierValueSand: {
-    color: theme.sand,
-    fontWeight: 700,
-  },
-  prPanel: {
-    borderRadius: 20,
-    padding: "1rem",
-    background: theme.panelAlt,
-    border: "1px solid rgba(200,169,119,0.2)",
-    color: theme.text,
-  },
-  panelEyebrowDark: {
-    fontSize: "0.74rem",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.16em",
-    color: "rgba(232,237,242,0.7)",
-    fontWeight: 800,
-  },
-  prTitle: {
-    marginTop: 8,
-    fontSize: "1rem",
-    fontWeight: 800,
-  },
-  prCode: {
-    marginTop: 10,
-    borderRadius: 12,
-    background: theme.bg,
-    border: "1px solid rgba(255,255,255,0.08)",
-    padding: "0.65rem 0.75rem",
-    fontFamily: 'ui-monospace, "SFMono-Regular", monospace',
-    fontSize: "0.8rem",
-    color: theme.sand,
-  },
-  prMeta: {
-    marginTop: 10,
-    color: theme.textMuted,
-    fontSize: "0.8rem",
-    lineHeight: 1.5,
-  },
-  systemSection: {
+  signalBoard: {
     position: "relative",
     zIndex: 1,
-    maxWidth: 1240,
-    margin: "0 auto",
-    padding: "1.5rem 1.5rem 0",
+    border: `1px solid ${theme.line}`,
+    borderRadius: 4,
+    minHeight: 480,
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
+    padding: 18,
+    background: theme.black,
   },
-  sectionIntro: {
-    maxWidth: 720,
-    marginBottom: "1.4rem",
+  signalPathAccent: {
+    fill: "none",
+    stroke: theme.accent,
+    strokeWidth: 1.5,
+    vectorEffect: "non-scaling-stroke",
+    strokeDasharray: "90 18",
+    opacity: 0.46,
+  },
+  signalNodeAccent: {
+    fill: theme.accent,
+    opacity: 0.9,
+  },
+  boardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    color: theme.muted,
+    fontSize: "0.78rem",
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
+    fontWeight: 800,
+  },
+  signalRail: {
+    display: "grid",
+    gap: 0,
+    borderTop: `1px solid ${theme.line}`,
+    borderBottom: `1px solid ${theme.line}`,
+  },
+  routeStep: {
+    display: "grid",
+    gridTemplateColumns: "64px 1fr",
+    borderBottom: `1px solid ${theme.line}`,
+    minHeight: 78,
+    alignItems: "center",
+  },
+  routeIndex: {
+    color: theme.muted,
+    fontSize: "0.82rem",
+    fontWeight: 800,
+  },
+  routeName: {
+    fontSize: "clamp(1.35rem, 2.6vw, 2.4rem)",
+    fontWeight: 800,
+    letterSpacing: "-0.04em",
+  },
+  ticket: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 18,
+    border: `1px solid ${theme.white}`,
+    borderRadius: 3,
+    padding: 18,
+  },
+  ticketLabel: {
+    display: "inline-block",
+    marginBottom: 10,
+    color: theme.muted,
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
+    fontSize: "0.74rem",
+    fontWeight: 800,
+  },
+  ticketTitle: {
+    margin: 0,
+    maxWidth: 340,
+    fontSize: "1.45rem",
+    lineHeight: 1.05,
+    letterSpacing: "-0.04em",
+  },
+  ticketMeta: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    color: theme.muted,
+    fontSize: "0.8rem",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+  },
+  whiteSection: {
+    background: theme.white,
+    color: theme.black,
+    padding: "clamp(64px, 8vw, 112px) 32px",
+  },
+  sectionGrid: {
+    maxWidth: 1180,
+    margin: "0 auto",
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 0.9fr) minmax(280px, 0.62fr)",
+    gap: "clamp(36px, 7vw, 96px)",
+    alignItems: "start",
+  },
+  sectionLabelDark: {
+    margin: "0 0 16px",
+    color: theme.inkMuted,
+    fontSize: "0.78rem",
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
+    fontWeight: 800,
+  },
+  sectionTitleDark: {
+    margin: 0,
+    fontSize: "clamp(2.2rem, 5vw, 5rem)",
+    lineHeight: 0.95,
+    letterSpacing: "-0.05em",
+  },
+  proofList: {
+    borderTop: `1px solid ${theme.lineDark}`,
+  },
+  proofItem: {
+    padding: "22px 0",
+    borderBottom: `1px solid ${theme.lineDark}`,
+    fontSize: "1.18rem",
+    fontWeight: 800,
+  },
+  blackSection: {
+    padding: "clamp(64px, 8vw, 108px) 32px",
+    borderTop: `1px solid ${theme.line}`,
+    borderBottom: `1px solid ${theme.line}`,
+  },
+  installLayout: {
+    maxWidth: 1180,
+    margin: "0 auto",
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 0.9fr) minmax(320px, 0.72fr)",
+    gap: "clamp(36px, 7vw, 96px)",
+    alignItems: "end",
   },
   sectionLabel: {
-    color: theme.sand,
+    margin: "0 0 16px",
+    color: theme.muted,
     fontSize: "0.78rem",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+    letterSpacing: "0.12em",
     fontWeight: 800,
   },
   sectionTitle: {
-    margin: "0.65rem 0 0 0",
-    fontFamily: fontBody,
-    fontSize: "clamp(1.7rem, 3.3vw, 2.7rem)",
-    lineHeight: 1.02,
+    margin: 0,
+    fontSize: "clamp(2rem, 4.2vw, 4.2rem)",
+    lineHeight: 0.98,
     letterSpacing: "-0.05em",
-  },
-  sectionBody: {
-    margin: "0.8rem 0 0 0",
-    color: theme.textSoft,
-    fontSize: "1rem",
-    lineHeight: 1.7,
-  },
-  stepGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: 14,
-  },
-  stepCard: {
-    borderRadius: 22,
-    border: `1px solid ${theme.line}`,
-    background: "rgba(17,24,39,0.72)",
-    padding: "1.2rem",
-  },
-  stepId: {
-    color: theme.sage,
-    fontSize: "0.82rem",
-    fontWeight: 800,
-    letterSpacing: "0.08em",
-  },
-  stepTitle: {
-    margin: "0.7rem 0 0 0",
-    fontSize: "1.08rem",
-    fontWeight: 800,
-    lineHeight: 1.2,
-  },
-  stepBody: {
-    margin: "0.7rem 0 0 0",
-    color: theme.textSoft,
-    lineHeight: 1.65,
-    fontSize: "0.94rem",
-  },
-  installSection: {
-    position: "relative",
-    zIndex: 1,
-    maxWidth: 1240,
-    margin: "0 auto",
-    padding: "3rem 1.5rem 4.5rem",
-  },
-  installCard: {
-    borderRadius: 28,
-    border: `1px solid ${theme.line}`,
-    background: theme.panel,
-    padding: "1.4rem",
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(300px, 420px)",
-    gap: "1rem",
-    alignItems: "end",
   },
   codeRow: {
     display: "flex",
-    alignItems: "center",
     gap: 10,
-    flexWrap: "wrap" as const,
-    borderRadius: 18,
+    alignItems: "center",
     border: `1px solid ${theme.line}`,
-    background: theme.bg,
-    padding: "0.9rem",
+    borderRadius: 3,
+    padding: 10,
   },
   code: {
     flex: 1,
-    minWidth: 220,
-    color: theme.text,
+    minWidth: 0,
+    color: theme.white,
+    border: 0,
+    fontSize: "0.92rem",
+    wordBreak: "break-all",
     fontFamily: 'ui-monospace, "SFMono-Regular", monospace',
-    fontSize: "0.86rem",
-    wordBreak: "break-all" as const,
   },
   copyBtn: {
-    border: "none",
+    border: `1px solid ${theme.white}`,
     background: theme.white,
-    color: theme.dark,
-    padding: "0.72rem 0.95rem",
-    borderRadius: 12,
-    fontSize: "0.84rem",
+    color: theme.black,
+    borderRadius: 3,
+    padding: "11px 14px",
+    fontFamily: "inherit",
     fontWeight: 800,
     cursor: "pointer",
-    fontFamily: fontBody,
-    whiteSpace: "nowrap" as const,
+    transition: "transform 160ms ease",
+  },
+  finalCta: {
+    padding: "clamp(64px, 9vw, 128px) 32px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 24,
+    flexWrap: "wrap",
+  },
+  finalTitle: {
+    margin: 0,
+    maxWidth: 780,
+    fontSize: "clamp(2.1rem, 5vw, 5.2rem)",
+    lineHeight: 0.95,
+    letterSpacing: "-0.05em",
+  },
+  finalButton: {
+    border: `1px solid ${theme.white}`,
+    background: theme.white,
+    color: theme.black,
+    borderRadius: 3,
+    padding: "14px 18px",
+    fontFamily: "inherit",
+    fontWeight: 800,
+    cursor: "pointer",
+    transition: "transform 160ms ease",
   },
 };

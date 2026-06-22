@@ -611,7 +611,7 @@ async function handleWidgetConfig(
       projectName: project.name,
       theme: "light",
       position: "bottom-right",
-      primaryColor: "#007bff",
+      primaryColor: "#000000",
       title: "Send us your feedback",
     },
   });
