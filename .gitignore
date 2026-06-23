@@ -13,6 +13,7 @@ dist/
 # IDE
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 
@@ -29,3 +30,8 @@ npm-debug.log*
 
 # Local architecture notes (agent context, not committed)
 architecture-decisions.md
+AGENT_HANDOFF_OAUTH_AND_HTTP.md
+AGENTS.md
+
+# Ephemeral browser profiles (automation / screenshots)
+chrome-profile-shot/
