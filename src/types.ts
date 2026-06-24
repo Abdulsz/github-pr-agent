@@ -50,6 +50,29 @@ export interface ExecutionPlan {
   createdAt: number;
 }
 
+/** A single decomposed unit of work produced by the planner (AD-004). */
+export interface PlanSubtask {
+  /** What to do for this subtask. */
+  title: string;
+  /** Repo file paths this subtask is expected to touch (may include new files). */
+  files: string[];
+  /** Concrete, checkable outcomes that prove this subtask is done. */
+  acceptance: string[];
+}
+
+/**
+ * A task plan produced before any edits, decomposing a feature into ordered
+ * subtasks plus overall acceptance criteria used to verify completeness.
+ */
+export interface TaskPlan {
+  /** One-sentence description of the chosen approach. */
+  summary: string;
+  subtasks: PlanSubtask[];
+  /** Overall checks that must all hold before opening a PR. */
+  acceptanceCriteria: string[];
+  createdAt: number;
+}
+
 export interface AgentState {
   // Current task status
   status:
@@ -84,6 +107,9 @@ export interface AgentState {
 
   // Structured multi-step execution plan
   plan?: ExecutionPlan;
+
+  // AD-004: decomposed task plan (subtasks + acceptance criteria)
+  taskPlan?: TaskPlan;
 }
 
 export interface ChatMessage {

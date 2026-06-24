@@ -1,12 +1,14 @@
 import { Agent, routeAgentRequest, callable } from "agents";
 import type { Env, AgentState, PRRequest, FileChange, PRResult, ExecutionPlan, PlanStep } from "./types";
 import { runReActAgent } from "./react-agent";
+import type { ReActContext } from "./react-agent";
 import { handleFeedbackRoutes } from "./feedback/routes";
 import {
   decodeGitHubFileContent,
   hasPlaceholderContent,
   validateUpdateContent,
 } from "./file-edits";
+import type { CompareCommitsResult, CodeSearchResult } from "./github-types";
 
 // Structured plan step IDs for PR creation (order defines execution)
 const PLAN_STEP_IDS = [
@@ -130,6 +132,25 @@ export class GitHubAPI {
     return this.request<GitHubContent[]>(`/repos/${owner}/${repo}/contents/${path}`);
   }
 
+  /**
+   * Get the full recursive file tree for a ref in a single call.
+   * Returns normalized entries with type "file" (blob) or "dir" (tree).
+   */
+  async getRepoTree(
+    owner: string,
+    repo: string,
+    ref: string
+  ): Promise<{ path: string; type: string }[]> {
+    const res = await this.request<{
+      tree?: { path: string; type: string }[];
+      truncated?: boolean;
+    }>(`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
+    return (res.tree ?? []).map((t) => ({
+      path: t.path,
+      type: t.type === "tree" ? "dir" : "file",
+    }));
+  }
+
   async getRef(owner: string, repo: string, ref: string): Promise<GitHubRef> {
     return this.request<GitHubRef>(`/repos/${owner}/${repo}/git/ref/heads/${ref}`);
   }
@@ -192,16 +213,34 @@ export class GitHubAPI {
     });
   }
 
-  // Compare two refs to determine if there are commits ahead on head vs base
+  // Compare two refs; response includes files[].patch for verification
   async compareCommits(
     owner: string,
     repo: string,
     base: string,
     head: string
-  ): Promise<{ ahead_by: number; behind_by: number; total_commits: number } & Record<string, unknown>> {
-    return this.request(
+  ): Promise<CompareCommitsResult> {
+    return this.request<CompareCommitsResult>(
       `/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`
     );
+  }
+
+  /** Search code in a repository via GitHub code search API. */
+  async searchCode(
+    owner: string,
+    repo: string,
+    query: string,
+    perPage = 20
+  ): Promise<CodeSearchResult[]> {
+    const q = encodeURIComponent(`${query} repo:${owner}/${repo}`);
+    const result = await this.request<{
+      items: { path: string; text_matches?: { fragment: string }[] }[];
+    }>(`/search/code?q=${q}&per_page=${perPage}`);
+
+    return (result.items ?? []).map((item) => ({
+      path: item.path,
+      fragments: (item.text_matches ?? []).map((m) => m.fragment),
+    }));
   }
 }
 
@@ -884,16 +923,23 @@ Output ONLY the JSON array. Start with [ end with ]`;
         progressMessages: [],
         result: undefined,
         errorMessage: undefined,
+        taskPlan: undefined,
       });
 
       this.addProgress(`Starting ReAct autonomous PR creation for ${repoInfo.owner}/${repoInfo.repo}`);
       this.addProgress("Agent will reason and act autonomously using GitHub tools...");
 
-      const ctx = {
+      const ctx: ReActContext = {
         github: this.github!,
         repoInfo,
         request,
         addProgress: (msg: string) => this.addProgress(msg),
+        workingBranch: "",
+        readCache: new Map(),
+        fullFilePaths: new Set(),
+        editedPaths: new Set(),
+        knownPaths: new Set(),
+        recordPlan: (plan) => this.setState({ ...this.state, taskPlan: plan }),
       };
 
       const result = await runReActAgent(this.env, ctx);
@@ -958,6 +1004,7 @@ Output ONLY the JSON array. Start with [ end with ]`;
       progressMessages: this.state.progressMessages,
       result: this.state.result,
       plan: this.state.plan,
+      taskPlan: this.state.taskPlan,
     };
   }
 

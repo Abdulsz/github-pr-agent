@@ -10,7 +10,7 @@
     "build": "vite build",
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test src/file-edits.test.ts"
+    "test": "node --import tsx --test src/file-edits.test.ts src/file-text.test.ts src/pr-verifier.test.ts src/planner.test.ts src/react-agent.test.ts"
   },
   "keywords": [
     "cloudflare",

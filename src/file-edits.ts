@@ -1,3 +1,5 @@
+import { splitLines } from "./file-text";
+
 /** Files above this size should use apply_file_edits instead of full rewrites. */
 export const LARGE_FILE_THRESHOLD = 8000;
 
@@ -109,23 +111,6 @@ function computeLineStarts(content: string): number[] {
     }
   }
   return starts;
-}
-
-function splitLines(content: string): string[] {
-  const lines: string[] = [];
-  let start = 0;
-  for (let i = 0; i < content.length; i++) {
-    if (content[i] === "\r" && content[i + 1] === "\n") {
-      lines.push(content.slice(start, i));
-      start = i + 2;
-      i++;
-    } else if (content[i] === "\n") {
-      lines.push(content.slice(start, i));
-      start = i + 1;
-    }
-  }
-  lines.push(content.slice(start));
-  return lines;
 }
 
 export function getLineNumber(content: string, index: number): number {

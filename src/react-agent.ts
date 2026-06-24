@@ -11,13 +11,24 @@
  * with traditional function calling and a small control loop.
  */
 
-import type { PRRequest } from "./types";
+import type { PRRequest, TaskPlan } from "./types";
+import type { CompareCommitsResult } from "./github-types";
+import { createTaskPlan, formatPlanForPrompt } from "./planner";
 import {
   LARGE_FILE_THRESHOLD,
   applySearchReplaceEdits,
   decodeGitHubFileContent,
   validateUpdateContent,
 } from "./file-edits";
+import {
+  appendToReadCache,
+  isSearchInReadContent,
+} from "./file-text";
+import {
+  grepInFileContent,
+  readFileSectionContent,
+} from "./file-navigation";
+import { verifyTaskCompletion } from "./pr-verifier";
 
 /** Safe string for prompts/display; Workers AI or clients may send non-string. */
 function safeStr(value: unknown): string {
@@ -46,9 +57,30 @@ function parseIfStringified<T>(value: unknown): T[] | null {
   return null;
 }
 
+/** Unwrap the { type, value } scalar shape occasionally emitted by the model. */
+export function normalizeToolArguments(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizeToolArguments);
+  if (!value || typeof value !== "object") return value;
+
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length === 2 && keys.includes("type") && keys.includes("value")) {
+    return normalizeToolArguments(record.value);
+  }
+  return Object.fromEntries(
+    Object.entries(record).map(([key, item]) => [key, normalizeToolArguments(item)])
+  );
+}
+
+export interface CodeSearchHit {
+  path: string;
+  fragments: string[];
+}
+
 /** GitHub API interface - methods used by ReAct tools */
 export interface GitHubAPIForReAct {
   getRepoContents(owner: string, repo: string, path?: string): Promise<{ path: string; type: string }[]>;
+  getRepoTree(owner: string, repo: string, ref: string): Promise<{ path: string; type: string }[]>;
   getFileContent(owner: string, repo: string, path: string, ref?: string): Promise<{ content?: string; sha?: string }>;
   getRef(owner: string, repo: string, ref: string): Promise<{ object: { sha: string } }>;
   createRef(owner: string, repo: string, ref: string, sha: string): Promise<unknown>;
@@ -74,7 +106,13 @@ export interface GitHubAPIForReAct {
     repo: string,
     base: string,
     head: string
-  ): Promise<{ ahead_by: number; behind_by: number; total_commits: number } & Record<string, unknown>>;
+  ): Promise<CompareCommitsResult>;
+  searchCode(
+    owner: string,
+    repo: string,
+    query: string,
+    perPage?: number
+  ): Promise<CodeSearchHit[]>;
 }
 
 /** Context passed to tool executions */
@@ -83,6 +121,86 @@ export interface ReActContext {
   repoInfo: { owner: string; repo: string };
   request: PRRequest;
   addProgress: (msg: string) => void;
+  workingBranch: string;
+  readCache: Map<string, string>;
+  fullFilePaths: Set<string>;
+  /** Paths the agent has successfully committed edits to (via apply_file_edits / commit_files). */
+  editedPaths: Set<string>;
+  /** Paths observed from get_repo_structure listings; used to suggest recovery targets. */
+  knownPaths: Set<string>;
+  /** AD-004: task plan (subtasks + acceptance criteria), set before the loop runs. */
+  plan?: TaskPlan;
+  /** AD-004: persist the plan to agent state for visibility via /status. */
+  recordPlan?: (plan: TaskPlan) => void;
+}
+
+function isValidationError(message: string): boolean {
+  return (
+    message.includes("Update rejected") ||
+    message.includes("placeholder stub") ||
+    message.includes("appears to be a placeholder")
+  );
+}
+
+async function fetchFileText(
+  ctx: ReActContext,
+  path: string,
+  ref?: string
+): Promise<string> {
+  const content = await ctx.github.getFileContent(
+    ctx.repoInfo.owner,
+    ctx.repoInfo.repo,
+    path,
+    ref ?? ctx.workingBranch
+  );
+  return decodeGitHubFileContent(content.content);
+}
+
+/**
+ * Suggest real paths from knownPaths when the model references a missing file.
+ * Prefers files sharing the same basename, then files under the same intended
+ * directory, then a short sample of known files.
+ */
+function suggestKnownPaths(missingPath: string, ctx: ReActContext): string {
+  const known = [...ctx.knownPaths];
+  if (known.length === 0) return "";
+  const base = missingPath.split("/").pop()?.toLowerCase() ?? "";
+  const baseNoExt = base.replace(/\.[^.]+$/, "");
+  const dir = missingPath.includes("/")
+    ? missingPath.slice(0, missingPath.lastIndexOf("/")).toLowerCase()
+    : "";
+
+  const byBasename = known.filter((p) => {
+    const b = p.split("/").pop()?.toLowerCase() ?? "";
+    return b === base || b.replace(/\.[^.]+$/, "") === baseNoExt;
+  });
+  const byDir = dir
+    ? known.filter((p) => p.toLowerCase().startsWith(dir + "/"))
+    : [];
+
+  const ranked = [...new Set([...byBasename, ...byDir])].slice(0, 15);
+  const list = ranked.length ? ranked : known.slice(0, 15);
+  return ` Valid paths you can use include: ${list.join(", ")}.`;
+}
+
+function assertSearchReadable(
+  path: string,
+  search: string,
+  ctx: ReActContext
+): void {
+  const readContent = ctx.readCache.get(path);
+  if (!readContent) {
+    throw new Error(
+      `You must read "${path}" first using read_file or read_file_section before apply_file_edits.`
+    );
+  }
+  if (ctx.fullFilePaths.has(path)) return;
+  if (!isSearchInReadContent(search, readContent)) {
+    throw new Error(
+      `Search string not found in previously read content for "${path}". ` +
+        `Use grep_in_file to locate the code, then read_file_section around those lines before editing.`
+    );
+  }
 }
 
 /**
@@ -102,7 +220,7 @@ type ReActTool = {
  * The `parameters` field follows the Workers AI traditional function
  * calling JSON schema format.
  */
-function createReActTools(ctx: ReActContext): ReActTool[] {
+function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
   return [
     {
       name: "get_repo_structure",
@@ -130,6 +248,9 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
           path: item.path,
           type: item.type,
         }));
+        for (const item of structure) {
+          if (item.type === "file") ctx.knownPaths.add(item.path);
+        }
         ctx.addProgress(`Found ${structure.length} items`);
         return { structure };
       },
@@ -156,31 +277,27 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
       execute: async ({ path, ref }: { path: string; ref?: string }) => {
         ctx.addProgress(`Reading ${path}${ref ? ` from ${ref}` : ""}...`);
         try {
-          const content = await ctx.github.getFileContent(
-            ctx.repoInfo.owner,
-            ctx.repoInfo.repo,
-            path,
-            ref
-          );
-          const text = decodeGitHubFileContent(content.content);
+          const text = await fetchFileText(ctx, path, ref);
           const isLarge = text.length > LARGE_FILE_THRESHOLD;
           if (isLarge) {
             ctx.addProgress(`File ${path} is very large (${text.length} chars)`);
           }
-          // Large files: return excerpt only so the model can plan apply_file_edits
-          // without blowing the context window. apply_file_edits fetches full content from GitHub.
           if (isLarge) {
             const head = text.slice(0, 3000);
             const tail = text.slice(-1500);
+            const excerpt = `${head}\n\n... [${text.length - 4500} chars omitted] ...\n\n${tail}`;
+            appendToReadCache(ctx.readCache, path, excerpt);
             return {
               path,
               length: text.length,
               truncated: true,
-              contentExcerpt: `${head}\n\n... [${text.length - 4500} chars omitted — use exact substrings from this excerpt for apply_file_edits] ...\n\n${tail}`,
+              contentExcerpt: excerpt,
               recommendation:
-                "use apply_file_edits instead of commit_files for this file",
+                "Middle of file omitted. Use grep_in_file to find relevant lines, then read_file_section before apply_file_edits.",
             };
           }
+          ctx.fullFilePaths.add(path);
+          appendToReadCache(ctx.readCache, path, text);
           return {
             path,
             content: text,
@@ -194,10 +311,148 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
           if (errMsg.includes("404") || errMsg.includes("Not Found")) {
             throw new Error(
               `File "${path}" does not exist in the repository. ` +
-              `Do NOT guess another path. Call get_repo_structure to list the actual files and directories, then use one of the returned paths.`
+              `Do NOT guess another path.` +
+              suggestKnownPaths(path, ctx)
             );
           }
           throw new Error(`Failed to read ${path}: ${errMsg}`);
+        }
+      },
+    },
+
+    {
+      name: "grep_in_file",
+      description:
+        "Search for a regex pattern in a single file. Returns matching line numbers and snippets. Use this to LOCATE code before read_file_section and apply_file_edits, especially in large files.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "File path to search",
+          },
+          pattern: {
+            type: "string",
+            description: "Regex pattern (e.g. '<Box|return \\(|bgcolor')",
+          },
+          ref: {
+            type: "string",
+            description: "Optional branch/ref (defaults to working branch)",
+          },
+        },
+        required: ["path", "pattern"],
+      },
+      execute: async ({
+        path,
+        pattern,
+        ref,
+      }: {
+        path: string;
+        pattern: string;
+        ref?: string;
+      }) => {
+        ctx.addProgress(`Searching ${path} for /${pattern}/...`);
+        let text: string;
+        try {
+          text = await fetchFileText(ctx, path, ref);
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          if (errMsg.includes("404") || errMsg.includes("Not Found")) {
+            throw new Error(
+              `File "${path}" does not exist in the repository. Do NOT guess another path.` +
+                suggestKnownPaths(path, ctx)
+            );
+          }
+          throw error;
+        }
+        const result = grepInFileContent(text, pattern, path);
+        ctx.addProgress(`Found ${result.matchCount} match(es) in ${path}`);
+        return result;
+      },
+    },
+
+    {
+      name: "read_file_section",
+      description:
+        "Read a specific line range from a file (1-indexed, inclusive). Returns numbered lines. REQUIRED before apply_file_edits on large files — use after grep_in_file to load the exact region you will edit.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "File path",
+          },
+          startLine: {
+            type: "number",
+            description: "First line to read (1-indexed)",
+          },
+          endLine: {
+            type: "number",
+            description: "Last line to read (1-indexed, max 150 lines per call)",
+          },
+          ref: {
+            type: "string",
+            description: "Optional branch/ref (defaults to working branch)",
+          },
+        },
+        required: ["path", "startLine", "endLine"],
+      },
+      execute: async ({
+        path,
+        startLine,
+        endLine,
+        ref,
+      }: {
+        path: string;
+        startLine: number;
+        endLine: number;
+        ref?: string;
+      }) => {
+        ctx.addProgress(`Reading ${path} lines ${startLine}-${endLine}...`);
+        const text = await fetchFileText(ctx, path, ref);
+        const section = readFileSectionContent(text, path, startLine, endLine);
+        appendToReadCache(ctx.readCache, path, section.content);
+        return section;
+      },
+    },
+
+    {
+      name: "grep_in_repo",
+      description:
+        "Search code across the repository using GitHub code search. Use to find which files contain relevant patterns before grep_in_file and read_file_section.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: {
+            type: "string",
+            description: "Search terms or pattern (e.g. 'dark mode page Box')",
+          },
+        },
+        required: ["pattern"],
+      },
+      execute: async ({ pattern }: { pattern: string }) => {
+        ctx.addProgress(`Searching repo for "${pattern}"...`);
+        try {
+          const hits = await ctx.github.searchCode(
+            ctx.repoInfo.owner,
+            ctx.repoInfo.repo,
+            pattern
+          );
+          if (hits.length === 0) {
+            return {
+              matchCount: 0,
+              hits: [],
+              hint: "No results. Try get_repo_structure to find candidate files, then grep_in_file on a specific path.",
+            };
+          }
+          return { matchCount: hits.length, hits };
+        } catch (e) {
+          const err = e instanceof Error ? e.message : String(e);
+          return {
+            matchCount: 0,
+            hits: [],
+            hint: `Code search failed (${err}). Use get_repo_structure and grep_in_file instead.`,
+          };
         }
       },
     },
@@ -258,7 +513,7 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
     {
       name: "apply_file_edits",
       description:
-        "Apply targeted search/replace edits to an EXISTING file and commit the result. PREFERRED for modifying existing files, especially large ones (>8KB). Each edit replaces exactly one occurrence of 'search' with 'replace'. Copy search strings exactly from read_file output.",
+        "Apply targeted search/replace edits to an EXISTING file and commit the result. PREFERRED for modifying existing files, especially large ones (>8KB). Each edit replaces exactly one occurrence of 'search' with 'replace'. Search strings MUST come from read_file or read_file_section output.",
       parameters: {
         type: "object",
         properties: {
@@ -310,6 +565,10 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
           );
         }
 
+        for (const edit of edits) {
+          assertSearchReadable(path, edit.search, ctx);
+        }
+
         ctx.addProgress(`Applying ${edits.length} edit(s) to ${path}...`);
 
         const existing = await ctx.github.getFileContent(
@@ -341,6 +600,7 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
           existing.sha
         );
 
+        ctx.editedPaths.add(path);
         ctx.addProgress(`${path} updated successfully via apply_file_edits`);
         return {
           success: true,
@@ -468,10 +728,7 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
                   throw new Error(validation.error);
                 }
               } catch (e) {
-                if (
-                  e instanceof Error &&
-                  e.message.includes("Update rejected")
-                ) {
+                if (e instanceof Error && isValidationError(e.message)) {
                   throw e;
                 }
                 ctx.addProgress(
@@ -490,6 +747,7 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
               branchName,
               sha
             );
+            ctx.editedPaths.add(change.path);
             results.push({ path: change.path, status: "ok" });
             ctx.addProgress(`${change.path} committed successfully`);
           } catch (e) {
@@ -541,19 +799,24 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
         title?: string;
       }) => {
         const base = targetBranch || "main";
-        // Preflight: ensure there are commits ahead on the feature branch vs base
+        if (ctx.editedPaths.size === 0) {
+          throw new Error(
+            "No successful file edits were made in this run. Use apply_file_edits or commit_files to make a real change before creating a PR."
+          );
+        }
         ctx.addProgress("Checking for commits between base and feature branch...");
+        let cmp: CompareCommitsResult;
         try {
-          const cmp = await ctx.github.compareCommits(
+          cmp = await ctx.github.compareCommits(
             ctx.repoInfo.owner,
             ctx.repoInfo.repo,
             base,
             branchName
           );
-          if (!cmp || typeof (cmp as any).ahead_by !== "number") {
+          if (typeof cmp.ahead_by !== "number") {
             throw new Error("Could not compare branches");
           }
-          if ((cmp as any).ahead_by <= 0) {
+          if (cmp.ahead_by <= 0) {
             throw new Error(
               `No commits between ${base} and ${branchName}. Use commit_files or apply_file_edits to create at least one commit before creating a PR.`
             );
@@ -562,7 +825,34 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
           const err = e instanceof Error ? e.message : String(e);
           throw new Error(`Preflight check failed: ${err}`);
         }
-        ctx.addProgress("Creating pull request...");
+
+        ctx.addProgress("Verifying changes match the requested task...");
+        const patchFiles = (cmp.files ?? []).map((f) => ({
+          path: f.filename,
+          patch: f.patch,
+          additions: f.additions,
+          deletions: f.deletions,
+        }));
+        const verification = await verifyTaskCompletion(
+          env.AI,
+          safeStr(ctx.request.description),
+          patchFiles,
+          ctx.plan?.acceptanceCriteria
+        );
+        if (!verification.pass) {
+          // Return a structured, non-terminal failure so the control loop can
+          // inject targeted recovery guidance and let the agent try again,
+          // rather than surfacing this as a generic (potentially terminal) error.
+          ctx.addProgress(`Verification failed: ${verification.reason}`);
+          return {
+            success: false,
+            verificationFailed: true,
+            reason: verification.reason,
+            suggestedNext: verification.suggestedNext,
+            changedFiles: patchFiles.map((f) => f.path),
+          };
+        }
+        ctx.addProgress("Verification passed — creating pull request...");
         try {
           const pr = await ctx.github.createPullRequest(
             ctx.repoInfo.owner,
@@ -603,9 +893,13 @@ function createReActTools(ctx: ReActContext): ReActTool[] {
 export type ReActTools = ReturnType<typeof createReActTools>;
 
 const REACT_MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const MAX_STEPS = 15;
+const MAX_STEPS = 30;
 /** Max consecutive identical tool calls before we inject a nudge message. */
 const MAX_REPEATED_CALLS = 2;
+/** Max times create_pull_request can fail verification before we give up. */
+const MAX_VERIFY_RETRIES = 3;
+/** Max times the model may stop emitting tool calls (without a PR) before we give up. */
+const MAX_NO_TOOL_NUDGES = 3;
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -689,6 +983,149 @@ async function ensureBranchExists(
 }
 
 /**
+ * Pick the most likely file the agent still needs to edit after a verification
+ * failure. Prefers Next.js App Router / Pages Router home-page entry points that
+ * the agent has seen (in repo structure or read cache) but not yet edited, then
+ * falls back to any read-but-unedited file.
+ */
+function pickRecoveryTarget(ctx: ReActContext): string | null {
+  const homePageCandidates = [
+    "app/page.tsx",
+    "app/page.jsx",
+    "app/page.js",
+    "src/app/page.tsx",
+    "src/app/page.jsx",
+    "src/app/page.js",
+    "pages/index.tsx",
+    "pages/index.jsx",
+    "pages/index.js",
+  ];
+  const seen = new Set<string>([...ctx.knownPaths, ...ctx.readCache.keys()]);
+  for (const candidate of homePageCandidates) {
+    if (seen.has(candidate) && !ctx.editedPaths.has(candidate)) return candidate;
+  }
+  for (const path of ctx.readCache.keys()) {
+    if (!ctx.editedPaths.has(path)) return path;
+  }
+  return null;
+}
+
+/**
+ * Build a targeted recovery message for the agent after create_pull_request
+ * fails verification. Combines the verifier's reason/suggestedNext with a
+ * concrete file target and ready-to-run grep/read/edit commands.
+ */
+function buildRecoveryMessage(
+  ctx: ReActContext,
+  reason: string,
+  suggestedNext: string,
+  changedFiles: string[],
+  attempt: number,
+  maxAttempts: number
+): string {
+  const target = pickRecoveryTarget(ctx);
+  const lines = [
+    `SYSTEM: Your pull request was REJECTED by verification (attempt ${attempt}/${maxAttempts}). A PR was NOT created.`,
+    `Reason: ${reason}`,
+    `Suggested next step: ${suggestedNext}`,
+    "",
+    `Diff so far only touched: ${changedFiles.length ? changedFiles.join(", ") : "(no files)"}.`,
+    "Do NOT call create_pull_request again until you have made a real change that implements the task.",
+  ];
+  if (target) {
+    lines.push(
+      "",
+      `The likely real target you have NOT edited yet is "${target}". Work it like this:`,
+      `1. grep_in_file("${target}", "<|return \\\\(|className|style")`,
+      `2. read_file_section("${target}", <line near a match>, <that line + 60>)`,
+      `3. apply_file_edits on "${target}" with the actual UI/code change (search strings copied from the read output).`
+    );
+  } else {
+    lines.push(
+      "",
+      "Re-run get_repo_structure to find the real source file for this task, then grep_in_file + read_file_section before apply_file_edits."
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Turn an ambiguous patch error into an immediate, concrete next action. The
+ * patch helper already reports candidate lines; repeating the same hunk wastes
+ * the limited ReAct step budget, so force a targeted re-read and multi-line
+ * anchor instead.
+ */
+export function buildAmbiguousEditRecoveryMessage(
+  path: string,
+  errorMessage: string
+): string | null {
+  const match = errorMessage.match(/at lines ([\d,\s]+)/);
+  if (!match) return null;
+  const lines = match[1]
+    .split(",")
+    .map((line) => Number(line.trim()))
+    .filter((line) => Number.isInteger(line) && line > 0);
+  if (!lines.length) return null;
+
+  const start = Math.max(1, lines[0] - 6);
+  const end = lines[0] + 12;
+  return [
+    `SYSTEM: Your patch search in "${path}" was ambiguous at lines ${lines.join(", ")}. Do NOT retry the same search.`,
+    `Read the candidate that implements the task: read_file_section("${path}", ${start}, ${end}).`,
+    "Then retry apply_file_edits with a multi-line search copied from that read output, including a distinctive parent element and at least one surrounding line so it matches exactly once.",
+  ].join("\n");
+}
+
+function buildNoEditRecoveryMessage(ctx: ReActContext): string {
+  const target = ctx.plan?.subtasks.flatMap((subtask) => subtask.files)[0];
+  if (target) {
+    return [
+      "SYSTEM: PR creation is blocked because you have not committed an edit. Do NOT call create_pull_request again yet.",
+      `Your next action is grep_in_file("${target}", "<Box|return \\\\(") — do not search for the natural-language task phrase.`,
+      "Then read_file_section around the relevant UI match and use apply_file_edits with a unique multi-line search copied from that output.",
+    ].join("\n");
+  }
+  return "SYSTEM: PR creation is blocked because you have not committed an edit. Locate, read, and edit a task-relevant file before trying again.";
+}
+
+const MAX_TREE_FILES = 250;
+
+/**
+ * Load the full recursive file tree once at startup. Seeds `knownPaths` so the
+ * model sees real paths (and the recovery/404 logic can suggest them) instead
+ * of guessing nonexistent files like "app/pages/index.js". Returns a formatted
+ * file-list section for the prompt, or "" if the tree could not be loaded.
+ */
+async function loadRepoTreeSection(
+  ctx: ReActContext,
+  ref: string
+): Promise<string> {
+  try {
+    const tree = await ctx.github.getRepoTree(
+      ctx.repoInfo.owner,
+      ctx.repoInfo.repo,
+      ref
+    );
+    const files = tree.filter((t) => t.type === "file").map((t) => t.path);
+    for (const f of files) ctx.knownPaths.add(f);
+    if (!files.length) return "";
+    const shown = files.slice(0, MAX_TREE_FILES);
+    const omitted = files.length - shown.length;
+    ctx.addProgress(`Loaded ${files.length} file path(s) from the repo tree.`);
+    return (
+      `\nRepository files (these are the ONLY valid paths — use them EXACTLY, never invent paths):\n` +
+      shown.map((f) => `- ${f}`).join("\n") +
+      (omitted > 0 ? `\n- ... and ${omitted} more file(s)` : "") +
+      "\n"
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    ctx.addProgress(`Could not load repo tree (${msg}); will explore manually.`);
+    return "";
+  }
+}
+
+/**
  * Run the ReAct agent to autonomously create a PR using traditional function
  * calling with env.AI.run and a lightweight control loop.
  */
@@ -703,13 +1140,6 @@ export async function runReActAgent(
   error?: string;
   steps?: number;
 }> {
-  const tools = createReActTools(ctx);
-  const toolSpecs = tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    parameters: t.parameters,
-  }));
-
   const description = safeStr(ctx.request.description);
 
   const targetBranch = ctx.request.targetBranch || "main";
@@ -720,23 +1150,54 @@ export async function runReActAgent(
       .replace(/[^a-z0-9]/gi, "-")
       .toLowerCase()}`;
 
+  ctx.workingBranch = suggestedBranchName;
+  if (!ctx.readCache) ctx.readCache = new Map();
+  if (!ctx.fullFilePaths) ctx.fullFilePaths = new Set();
+  if (!ctx.editedPaths) ctx.editedPaths = new Set();
+  if (!ctx.knownPaths) ctx.knownPaths = new Set();
+
+  const tools = createReActTools(ctx, env);
+  const toolSpecs = tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    parameters: t.parameters,
+  }));
+
+  // Load the full file tree up-front so the model never has to guess paths.
+  const repoTreeSection = await loadRepoTreeSection(ctx, targetBranch);
+
+  // AD-004: decompose the task into a plan with acceptance criteria before
+  // editing. Persist it and inject it into the executor prompt; the verifier
+  // later checks the diff against plan.acceptanceCriteria.
+  ctx.addProgress("Planning the change before editing...");
+  const plan = await createTaskPlan(env.AI, description, [...ctx.knownPaths]);
+  ctx.plan = plan;
+  ctx.recordPlan?.(plan);
+  ctx.addProgress(
+    `Plan ready: ${plan.subtasks.length} subtask(s), ${plan.acceptanceCriteria.length} acceptance criteria.`
+  );
+  const planSection = `\n${formatPlanForPrompt(plan)}\n`;
+
   const systemPrompt = `You are an autonomous GitHub PR agent. Create a pull request based on the user's description.
 
 WORKFLOW (follow strictly in order):
-1. Call get_repo_structure("") to list the root. MANDATORY first step.
-2. Optionally explore subdirectories with get_repo_structure if needed.
-3. Call read_file on every file you plan to modify.
-4. Commit changes:
-   - EXISTING files (especially >8KB): use apply_file_edits with search/replace hunks.
-   - NEW files or small files (<8KB): use commit_files.
-5. Call create_pull_request to open the PR.
+1. EXPLORE: The full list of repository files is provided in the user message. Use ONLY those exact paths. Call get_repo_structure(path) only if you need to confirm a directory's contents. NEVER invent paths that are not in the provided list.
+2. LOCATE: Find relevant files and code regions using grep_in_repo and/or grep_in_file.
+3. READ: For large files (>8KB), read_file returns only head/tail — you MUST call read_file_section on the lines you will edit before patching.
+4. EDIT: apply_file_edits for existing files (especially large ones); commit_files for NEW or small files (<8KB).
+5. VERIFY: create_pull_request runs automatic verification. If rejected, read more context, fix edits, and retry.
 
-APPLY_FILE_EDITS FORMAT (preferred for existing files):
-- Each edit: { "search": "exact substring from file", "replace": "new text" }
-- search must match EXACTLY ONCE in the file — copy verbatim from read_file.
+LOCATE + READ (critical for large files):
+- grep_in_file(path, "<Box|return \\(") → get line numbers
+- read_file_section(path, startLine, endLine) → numbered content for exact search strings
+- apply_file_edits search strings MUST come from read_file or read_file_section output
+
+APPLY_FILE_EDITS FORMAT:
+- Each edit: { "search": "exact substring from read output", "replace": "new text" }
+- search must match EXACTLY ONCE in the file
 - Example:
   apply_file_edits({
-    "branchName": "feature/my-change",
+    "branchName": "${suggestedBranchName}",
     "path": "app/page.js",
     "edits": [
       { "search": "<Box>", "replace": "<Box sx={{ bgcolor: 'black' }}>" }
@@ -746,26 +1207,25 @@ APPLY_FILE_EDITS FORMAT (preferred for existing files):
 COMMIT_FILES FORMAT (new or small files only):
 - "changes" MUST be a proper JSON array, NOT a string.
 - Each element: {"path":"file.css","content":"...full file content...","action":"update"}
-- For "update": include the COMPLETE file content (original + your changes).
-- For "create": include the full new file content.
+
+FRAMEWORK ROUTING (Next.js / React):
+- In a Next.js 13+ App Router repo (an "app/" or "src/app/" directory exists), the home/landing page is "app/page.{js,jsx,tsx}" (layout is "app/layout.*"). The Pages Router equivalent is "pages/index.*".
+- NEVER create or edit "public/index.html" in an App Router project — it is not the rendered page and will be rejected.
+- If the task mentions "home", "landing", or "page" and the structure contains "app/page.*" (or "pages/index.*"), you MUST grep_in_file that page file and read_file_section it before editing "app/layout.*" or anything under "public/".
 
 FILE UPDATE RULES:
-- ALWAYS read_file before modifying. Preserve ALL existing code.
+- ALWAYS read before modifying. Preserve ALL existing code.
 - NEVER use "// ..." or placeholder comments — they will be rejected.
-- For large files, read_file returns contentExcerpt + recommendation — use apply_file_edits with exact substrings from the excerpt.
+- Do NOT patch imports/comments when the task is about UI/styling — edit the JSX/CSS.
 
 ERROR RECOVERY:
-- If a tool fails, read the error and fix the issue. Do NOT repeat the same failing call.
+- If create_pull_request fails verification, follow suggestedNext (grep → read_file_section → apply_file_edits).
 - If commit_files is rejected as truncated, switch to apply_file_edits.
-- Do NOT call get_repo_structure more than twice total. You already have the structure.
-- NEVER repeat the same tool call with the same arguments. Try a different approach.
-
-PATH RULES:
-- ONLY use paths returned by get_repo_structure. Never guess or invent paths.
-- If read_file returns 404, use get_repo_structure to find the correct path.
+- NEVER repeat the same failing tool call with the same arguments.
 
 PR RULE:
-- Do NOT call create_pull_request until commit_files or apply_file_edits has succeeded.`;
+- You MUST make at least one successful apply_file_edits or commit_files change before create_pull_request. Do not use PR creation as a preflight probe.
+- create_pull_request verifies the diff matches the task. Trivial or unrelated edits will be rejected.`;
 
   const userPrompt = `Create a pull request for this repository.
 
@@ -774,8 +1234,8 @@ User request: ${description}
 
 Target branch: ${targetBranch}
 Feature branch (already created for you): ${suggestedBranchName}
-
-Start by exploring the repository structure, then implement the changes, commit your changes to the feature branch, and only then open the pull request.`;
+${repoTreeSection}${planSection}
+Treat the plan as an initial scope hypothesis, not a rigid file limit. Start with its target file(s). Expand to another listed file only after locating and reading evidence of a real dependency; do not add files merely because a task sounds broad. Only after ALL acceptance criteria are satisfied, open the pull request. Do NOT read or edit paths that are not in the list.`;
 
   type Message = { role: "system" | "user" | "assistant" | "tool"; content: string; name?: string };
 
@@ -795,6 +1255,15 @@ Start by exploring the repository structure, then implement the changes, commit 
   // Track consecutive repeated tool calls for loop detection.
   let lastToolCallSignature = "";
   let repeatCount = 0;
+
+  // Track verification failures so they don't silently exhaust the step budget.
+  let verifyFailures = 0;
+  let recoveryMessage: string | null = null;
+  let giveUpAfterVerify = false;
+
+  // Track turns where the model stopped emitting tool calls without finishing
+  // the PR, so we can nudge it to continue instead of ending prematurely.
+  let noToolCallNudges = 0;
 
   try {
     // Make sure the working branch exists before the loop so create_pull_request
@@ -823,8 +1292,30 @@ Start by exploring the repository structure, then implement the changes, commit 
         Array.isArray(result.tool_calls) ? result.tool_calls : [];
 
       if (!toolCalls.length) {
-        // No more tool calls – we are done.
-        break;
+        // The model stopped calling tools. Only treat this as "done" if a PR
+        // was actually created. Otherwise the agent quit early (often after a
+        // tool error) — nudge it to continue, up to a bounded number of times.
+        if (prOutput?.success) break;
+        if (noToolCallNudges >= MAX_NO_TOOL_NUDGES) {
+          ctx.addProgress(
+            `Model stopped emitting tool calls ${noToolCallNudges + 1} time(s) without creating a PR. Giving up.`
+          );
+          break;
+        }
+        noToolCallNudges++;
+        ctx.addProgress(
+          `Model returned no tool call but no PR exists yet — nudging it to continue (${noToolCallNudges}/${MAX_NO_TOOL_NUDGES}).`
+        );
+        messages.push({
+          role: "user",
+          content:
+            "SYSTEM: You stopped without creating a pull request. You are NOT done until create_pull_request succeeds. " +
+            "Do not reply with plain text — call a tool now.\n" +
+            "- If your last tool call errored, fix the arguments and retry (e.g. apply_file_edits needs a non-empty edits array of { search, replace }).\n" +
+            "- If you have not edited the real target file yet, use grep_in_file then read_file_section to load it, then apply_file_edits.\n" +
+            "- Once a real change is committed, call create_pull_request.",
+        });
+        continue;
       }
 
       // --- Loop detection ---
@@ -850,11 +1341,11 @@ Start by exploring the repository structure, then implement the changes, commit 
           content:
             `SYSTEM: You are stuck in a loop calling ${toolCalls[0]?.name} repeatedly. ` +
             `STOP calling it again. Instead:\n` +
-            `- If you need to modify a file, use apply_file_edits (existing files) or read_file then commit_files (new/small files).\n` +
-            `- If commit_files was rejected as truncated, use apply_file_edits with exact search/replace hunks.\n` +
-            `- If commit_files previously failed, check that "changes" is a proper JSON array of objects, each with "path", "content", and "action" keys.\n` +
-            `- If you have already committed files, call create_pull_request.\n` +
-            `- Do NOT call get_repo_structure again — you already have the structure.`,
+            `- Use grep_in_file / read_file_section to locate and load the code you need to edit.\n` +
+            `- Use apply_file_edits (existing files) or read_file then commit_files (new/small files).\n` +
+            `- If create_pull_request failed verification, follow the suggested next step in the error.\n` +
+            `- If commit_files was rejected, use apply_file_edits with exact search/replace hunks.\n` +
+            `- Do NOT call get_repo_structure again unless you need a new path.`,
         });
         repeatCount = 0;
         lastToolCallSignature = "";
@@ -883,6 +1374,7 @@ Start by exploring the repository structure, then implement the changes, commit 
             ctx.addProgress(`Warning: Could not parse stringified arguments for ${call.name}`);
           }
         }
+        args = normalizeToolArguments(args);
         ctx.addProgress(
           `Tool: ${call.name}(${JSON.stringify(args).slice(0, 80)}...)`
         );
@@ -896,11 +1388,34 @@ Start by exploring the repository structure, then implement the changes, commit 
           });
 
           if (call.name === "create_pull_request" && output && typeof output === "object") {
-            prOutput = {
-              success: (output as any).success,
-              prUrl: (output as any).prUrl,
-              branchName: (output as any).branchName,
-            };
+            const out = output as any;
+            if (out.verificationFailed) {
+              verifyFailures++;
+              if (verifyFailures > MAX_VERIFY_RETRIES) {
+                giveUpAfterVerify = true;
+                ctx.addProgress(
+                  `Verification failed ${verifyFailures} time(s) (limit ${MAX_VERIFY_RETRIES}). Stopping.`
+                );
+              } else {
+                recoveryMessage = buildRecoveryMessage(
+                  ctx,
+                  safeStr(out.reason),
+                  safeStr(out.suggestedNext),
+                  Array.isArray(out.changedFiles) ? out.changedFiles : [],
+                  verifyFailures,
+                  MAX_VERIFY_RETRIES
+                );
+                ctx.addProgress(
+                  `Injecting recovery guidance after verification failure (attempt ${verifyFailures}/${MAX_VERIFY_RETRIES}).`
+                );
+              }
+            } else {
+              prOutput = {
+                success: out.success,
+                prUrl: out.prUrl,
+                branchName: out.branchName,
+              };
+            }
           }
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
@@ -910,6 +1425,23 @@ Start by exploring the repository structure, then implement the changes, commit 
             name: call.name,
             content: JSON.stringify({ error: errMsg }),
           });
+          if (call.name === "apply_file_edits") {
+            const path = typeof args === "object" && args ? (args as { path?: unknown }).path : undefined;
+            if (typeof path === "string") {
+              const recovery = buildAmbiguousEditRecoveryMessage(path, errMsg);
+              if (recovery) {
+                recoveryMessage = recovery;
+                ctx.addProgress("Injecting recovery guidance after ambiguous file edit.");
+              }
+            }
+          }
+          if (
+            call.name === "create_pull_request" &&
+            errMsg.includes("No successful file edits were made in this run")
+          ) {
+            recoveryMessage = buildNoEditRecoveryMessage(ctx);
+            ctx.addProgress("Injecting guidance after premature PR creation.");
+          }
         }
       }
 
@@ -918,7 +1450,28 @@ Start by exploring the repository structure, then implement the changes, commit 
         ctx.addProgress("PR created — finishing agent loop.");
         break;
       }
+
+      // Verification exhausted its retry budget — stop before burning steps.
+      if (giveUpAfterVerify) {
+        break;
+      }
+
+      // Inject targeted recovery guidance as a user message so the agent loops
+      // back to grep/read/edit the real target instead of retrying blindly.
+      if (recoveryMessage) {
+        messages.push({ role: "user", content: recoveryMessage });
+        recoveryMessage = null;
+        // Reset loop detection so the recovery turn isn't flagged as a repeat.
+        lastToolCallSignature = "";
+        repeatCount = 0;
+      }
     }
+
+    const failureError = giveUpAfterVerify
+      ? `Verification rejected the changes ${verifyFailures} time(s); no PR was created. The agent could not produce a diff that implements the task.`
+      : !prOutput?.prUrl
+      ? "ReAct agent did not complete PR creation"
+      : undefined;
 
     return {
       success: prOutput?.success ?? false,
@@ -926,7 +1479,7 @@ Start by exploring the repository structure, then implement the changes, commit 
       prUrl: prOutput?.prUrl,
       branchName: prOutput?.branchName ?? suggestedBranchName,
       steps: undefined,
-      error: prOutput?.success ? undefined : !prOutput?.prUrl ? "ReAct agent did not complete PR creation" : undefined,
+      error: prOutput?.success ? undefined : failureError,
     };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
