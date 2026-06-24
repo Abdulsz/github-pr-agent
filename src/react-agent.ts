@@ -11,7 +11,7 @@
  * with traditional function calling and a small control loop.
  */
 
-import type { PRRequest, TaskPlan } from "./types";
+import type { DiffSummary, PRRequest, TaskPlan } from "./types";
 import type { CompareCommitsResult } from "./github-types";
 import { createTaskPlan, formatPlanForPrompt } from "./planner";
 import {
@@ -132,6 +132,18 @@ export interface ReActContext {
   plan?: TaskPlan;
   /** AD-004: persist the plan to agent state for visibility via /status. */
   recordPlan?: (plan: TaskPlan) => void;
+  /** Persist the bounded compare diff inspected by the PR verification gate. */
+  recordDiff?: (diff: DiffSummary) => void;
+  /** True once the working branch exists on the remote (lazy branch lifecycle). */
+  branchMaterialized?: boolean;
+}
+
+/** Resolve which git ref to read from before opening files. */
+export function resolveReadRef(ctx: ReActContext, ref?: string): string {
+  const target = ctx.request.targetBranch || "main";
+  if (!ref) return target;
+  if (ref === ctx.workingBranch && !ctx.branchMaterialized) return target;
+  return ref;
 }
 
 function isValidationError(message: string): boolean {
@@ -151,7 +163,7 @@ async function fetchFileText(
     ctx.repoInfo.owner,
     ctx.repoInfo.repo,
     path,
-    ref ?? ctx.workingBranch
+    resolveReadRef(ctx, ref)
   );
   return decodeGitHubFileContent(content.content);
 }
@@ -458,59 +470,6 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
     },
 
     {
-      name: "create_branch",
-      description:
-        "Create a new branch from the target branch. Must be called before committing any changes.",
-      parameters: {
-        type: "object",
-        properties: {
-          branchName: {
-            type: "string",
-            description: "Name for the new branch (e.g. 'feature/dark-mode')",
-          },
-          fromBranch: {
-            type: "string",
-            description: "Branch to create from (default: main)",
-          },
-        },
-        required: ["branchName"],
-      },
-      execute: async ({
-        branchName,
-        fromBranch,
-      }: {
-        branchName: string;
-        fromBranch?: string;
-      }) => {
-        const source = fromBranch || "main";
-        ctx.addProgress(`Creating branch ${branchName} from ${source}...`);
-        try {
-          const targetRef = await ctx.github.getRef(
-            ctx.repoInfo.owner,
-            ctx.repoInfo.repo,
-            source
-          );
-          await ctx.github.createRef(
-            ctx.repoInfo.owner,
-            ctx.repoInfo.repo,
-            branchName,
-            targetRef.object.sha
-          );
-          ctx.addProgress(`Branch ${branchName} created successfully`);
-          return { success: true, branchName };
-        } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error);
-          // If the branch already exists, treat it as success so we can continue.
-          if (errMsg.includes("already exists") || errMsg.includes("422")) {
-            ctx.addProgress(`Branch ${branchName} already exists, continuing...`);
-            return { success: true, branchName, alreadyExists: true };
-          }
-          throw new Error(`Failed to create branch: ${errMsg}`);
-        }
-      },
-    },
-
-    {
       name: "apply_file_edits",
       description:
         "Apply targeted search/replace edits to an EXISTING file and commit the result. PREFERRED for modifying existing files, especially large ones (>8KB). Each edit replaces exactly one occurrence of 'search' with 'replace'. Search strings MUST come from read_file or read_file_section output.",
@@ -568,6 +527,12 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
         for (const edit of edits) {
           assertSearchReadable(path, edit.search, ctx);
         }
+
+        await ensureBranchExists(
+          ctx,
+          ctx.request.targetBranch || "main",
+          branchName
+        );
 
         ctx.addProgress(`Applying ${edits.length} edit(s) to ${path}...`);
 
@@ -687,6 +652,12 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
             "Each entry must have: path (string), content (string), action ('create' | 'update')."
           );
         }
+
+        await ensureBranchExists(
+          ctx,
+          ctx.request.targetBranch || "main",
+          branchName
+        );
 
         // Cap to a reasonable number to prevent runaway commits
         const MAX_CHANGES = 10;
@@ -833,6 +804,11 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
           additions: f.additions,
           deletions: f.deletions,
         }));
+        const diffSummary = summarizeCompareDiff(base, branchName, cmp);
+        ctx.recordDiff?.(diffSummary);
+        ctx.addProgress(
+          `Captured verification diff: ${diffSummary.files.length} file(s), ${diffSummary.aheadBy} commit(s) ahead.`
+        );
         const verification = await verifyTaskCompletion(
           env.AI,
           safeStr(ctx.request.description),
@@ -963,6 +939,7 @@ async function ensureBranchExists(
       workingBranch
     );
     ctx.addProgress(`Branch ${workingBranch} already exists.`);
+    ctx.branchMaterialized = true;
     return;
   } catch {
     // Fall through and attempt to create from sourceBranch.
@@ -980,6 +957,7 @@ async function ensureBranchExists(
     baseRef.object.sha
   );
   ctx.addProgress(`Branch ${workingBranch} created from ${sourceBranch}.`);
+  ctx.branchMaterialized = true;
 }
 
 /**
@@ -1049,6 +1027,28 @@ function buildRecoveryMessage(
   return lines.join("\n");
 }
 
+const MAX_DIFF_PREVIEW_CHARS = 1_200;
+
+/** Build bounded, status-safe evidence for the exact diff sent to verification. */
+export function summarizeCompareDiff(
+  baseBranch: string,
+  headBranch: string,
+  comparison: CompareCommitsResult
+): DiffSummary {
+  return {
+    baseBranch,
+    headBranch,
+    aheadBy: comparison.ahead_by ?? 0,
+    files: (comparison.files ?? []).map((file) => ({
+      path: file.filename,
+      additions: file.additions,
+      deletions: file.deletions,
+      patchPreview: (file.patch ?? "").slice(0, MAX_DIFF_PREVIEW_CHARS),
+    })),
+    capturedAt: Date.now(),
+  };
+}
+
 /**
  * Turn an ambiguous patch error into an immediate, concrete next action. The
  * patch helper already reports candidate lines; repeating the same hunk wastes
@@ -1091,6 +1091,41 @@ function buildNoEditRecoveryMessage(ctx: ReActContext): string {
 const MAX_TREE_FILES = 250;
 
 /**
+ * Rank repository paths for the task prompt without restricting the agent's
+ * complete known-path set. The ranking is deliberately deterministic: it
+ * reduces context noise without asking another model to guess project layout.
+ */
+export function rankFilesForTask(task: string, paths: string[]): string[] {
+  const terms = new Set(
+    task
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter((term) => term.length >= 3)
+  );
+  const lowerTask = task.toLowerCase();
+
+  return [...paths].sort((a, b) => {
+    const score = (path: string) => {
+      const lower = path.toLowerCase();
+      const basename = lower.split("/").pop() ?? lower;
+      let total = 0;
+      for (const term of terms) {
+        if (basename.includes(term)) total += 8;
+        else if (lower.includes(term)) total += 3;
+      }
+      if (/\b(home|landing)\s+page\b/.test(lowerTask) && /(^|\/)app\/page\.[jt]sx?$|(^|\/)pages\/index\.[jt]sx?$/.test(lower)) {
+        total += 20;
+      }
+      if (/\.(ts|tsx|js|jsx|css|scss|json|md)$/i.test(path)) total += 1;
+      return total;
+    };
+    const byScore = score(b) - score(a);
+    return byScore || a.localeCompare(b);
+  });
+}
+
+/**
  * Load the full recursive file tree once at startup. Seeds `knownPaths` so the
  * model sees real paths (and the recovery/404 logic can suggest them) instead
  * of guessing nonexistent files like "app/pages/index.js". Returns a formatted
@@ -1098,7 +1133,8 @@ const MAX_TREE_FILES = 250;
  */
 async function loadRepoTreeSection(
   ctx: ReActContext,
-  ref: string
+  ref: string,
+  task: string
 ): Promise<string> {
   try {
     const tree = await ctx.github.getRepoTree(
@@ -1109,7 +1145,8 @@ async function loadRepoTreeSection(
     const files = tree.filter((t) => t.type === "file").map((t) => t.path);
     for (const f of files) ctx.knownPaths.add(f);
     if (!files.length) return "";
-    const shown = files.slice(0, MAX_TREE_FILES);
+    const ranked = rankFilesForTask(task, files);
+    const shown = ranked.slice(0, MAX_TREE_FILES);
     const omitted = files.length - shown.length;
     ctx.addProgress(`Loaded ${files.length} file path(s) from the repo tree.`);
     return (
@@ -1151,6 +1188,7 @@ export async function runReActAgent(
       .toLowerCase()}`;
 
   ctx.workingBranch = suggestedBranchName;
+  ctx.branchMaterialized = false;
   if (!ctx.readCache) ctx.readCache = new Map();
   if (!ctx.fullFilePaths) ctx.fullFilePaths = new Set();
   if (!ctx.editedPaths) ctx.editedPaths = new Set();
@@ -1158,19 +1196,26 @@ export async function runReActAgent(
 
   const tools = createReActTools(ctx, env);
   const toolSpecs = tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    parameters: t.parameters,
+    type: "function" as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    },
   }));
 
   // Load the full file tree up-front so the model never has to guess paths.
-  const repoTreeSection = await loadRepoTreeSection(ctx, targetBranch);
+  const repoTreeSection = await loadRepoTreeSection(ctx, targetBranch, description);
 
   // AD-004: decompose the task into a plan with acceptance criteria before
   // editing. Persist it and inject it into the executor prompt; the verifier
   // later checks the diff against plan.acceptanceCriteria.
   ctx.addProgress("Planning the change before editing...");
-  const plan = await createTaskPlan(env.AI, description, [...ctx.knownPaths]);
+  const plan = await createTaskPlan(
+    env.AI,
+    description,
+    rankFilesForTask(description, [...ctx.knownPaths])
+  );
   ctx.plan = plan;
   ctx.recordPlan?.(plan);
   ctx.addProgress(
@@ -1233,7 +1278,7 @@ Repository: ${ctx.repoInfo.owner}/${ctx.repoInfo.repo}
 User request: ${description}
 
 Target branch: ${targetBranch}
-Feature branch (already created for you): ${suggestedBranchName}
+Feature branch (created automatically immediately before your first valid file mutation): ${suggestedBranchName}
 ${repoTreeSection}${planSection}
 Treat the plan as an initial scope hypothesis, not a rigid file limit. Start with its target file(s). Expand to another listed file only after locating and reading evidence of a real dependency; do not add files merely because a task sounds broad. Only after ALL acceptance criteria are satisfied, open the pull request. Do NOT read or edit paths that are not in the list.`;
 
@@ -1266,10 +1311,6 @@ Treat the plan as an initial scope hypothesis, not a rigid file limit. Start wit
   let noToolCallNudges = 0;
 
   try {
-    // Make sure the working branch exists before the loop so create_pull_request
-    // always has a valid "head" reference.
-    await ensureBranchExists(ctx, targetBranch, suggestedBranchName);
-
     for (let step = 0; step < MAX_STEPS; step++) {
       const result = await callModelWithRetry(env.AI, REACT_MODEL_ID, {
         messages,

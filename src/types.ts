@@ -33,6 +33,20 @@ export interface PRResult {
   branchName?: string;
 }
 
+/** Bounded compare-diff evidence captured before a ReAct PR is verified. */
+export interface DiffSummary {
+  baseBranch: string;
+  headBranch: string;
+  aheadBy: number;
+  files: Array<{
+    path: string;
+    additions?: number;
+    deletions?: number;
+    patchPreview: string;
+  }>;
+  capturedAt: number;
+}
+
 /** A single step in the execution plan */
 export interface PlanStep {
   id: string;
@@ -110,6 +124,9 @@ export interface AgentState {
 
   // AD-004: decomposed task plan (subtasks + acceptance criteria)
   taskPlan?: TaskPlan;
+
+  // Latest bounded compare diff inspected by the ReAct PR verification gate.
+  diffSummary?: DiffSummary;
 }
 
 export interface ChatMessage {

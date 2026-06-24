@@ -924,6 +924,7 @@ Output ONLY the JSON array. Start with [ end with ]`;
         result: undefined,
         errorMessage: undefined,
         taskPlan: undefined,
+        diffSummary: undefined,
       });
 
       this.addProgress(`Starting ReAct autonomous PR creation for ${repoInfo.owner}/${repoInfo.repo}`);
@@ -940,6 +941,7 @@ Output ONLY the JSON array. Start with [ end with ]`;
         editedPaths: new Set(),
         knownPaths: new Set(),
         recordPlan: (plan) => this.setState({ ...this.state, taskPlan: plan }),
+        recordDiff: (diff) => this.setState({ ...this.state, diffSummary: diff }),
       };
 
       const result = await runReActAgent(this.env, ctx);
@@ -1005,6 +1007,7 @@ Output ONLY the JSON array. Start with [ end with ]`;
       result: this.state.result,
       plan: this.state.plan,
       taskPlan: this.state.taskPlan,
+      diffSummary: this.state.diffSummary,
     };
   }
 
