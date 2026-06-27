@@ -23,12 +23,14 @@ import {
 import {
   appendToReadCache,
   isSearchInReadContent,
+  stripLineNumberPrefixes,
 } from "./file-text";
 import {
   grepInFileContent,
   readFileSectionContent,
 } from "./file-navigation";
 import { verifyTaskCompletion } from "./pr-verifier";
+import { isEditAllowed, primaryPlanPaths } from "./edit-scope";
 import {
   extractWorkersAiText,
   extractWorkersAiToolCalls,
@@ -227,6 +229,45 @@ function suggestKnownPaths(missingPath: string, ctx: ReActContext): string {
   return ` Valid paths you can use include: ${list.join(", ")}.`;
 }
 
+/** Minimum trimmed length for an acceptable single-line search anchor. */
+const MIN_SINGLE_LINE_ANCHOR_CHARS = 40;
+
+/**
+ * Reject fragile single-token anchors (e.g. "<Box>") that match ambiguously or
+ * drift from the file. A search is acceptable when the file was read in full,
+ * or the anchor spans 2+ non-empty lines, or a single line is long enough to be
+ * distinctive. Models must copy multi-line context from read_file_section.
+ */
+function assertSearchAnchorQuality(
+  path: string,
+  search: string,
+  ctx: ReActContext
+): void {
+  if (ctx.fullFilePaths.has(path)) return;
+  const nonEmptyLines = search
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (nonEmptyLines.length >= 2) return;
+  if ((nonEmptyLines[0]?.length ?? 0) >= MIN_SINGLE_LINE_ANCHOR_CHARS) return;
+  throw new Error(
+    `Search anchor for "${path}" is too weak (single short line). ` +
+      `Use grep_in_file to locate the code, read_file_section around it, then copy 2+ consecutive lines ` +
+      `(without the "123|" line-number prefixes) into the search string so it matches exactly once.`
+  );
+}
+
+/**
+ * Block edits to cross-cutting layout/theme/global files until the planned
+ * primary target has been edited, keeping the agent on-scope.
+ */
+function assertEditScopeAllowed(path: string, ctx: ReActContext): void {
+  const decision = isEditAllowed(path, ctx.plan, ctx.editedPaths);
+  if (!decision.allowed) {
+    throw new Error(decision.reason);
+  }
+}
+
 function assertSearchReadable(
   path: string,
   search: string,
@@ -238,6 +279,7 @@ function assertSearchReadable(
       `You must read "${path}" first using read_file or read_file_section before apply_file_edits.`
     );
   }
+  assertSearchAnchorQuality(path, search, ctx);
   if (ctx.fullFilePaths.has(path)) return;
   if (!isSearchInReadContent(search, readContent)) {
     throw new Error(
@@ -455,7 +497,7 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
         ctx.addProgress(`Reading ${path} lines ${startLine}-${endLine}...`);
         const text = await fetchFileText(ctx, path, ref);
         const section = readFileSectionContent(text, path, startLine, endLine);
-        appendToReadCache(ctx.readCache, path, section.content);
+        appendToReadCache(ctx.readCache, path, section.rawContent);
         return section;
       },
     },
@@ -543,19 +585,29 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
         edits: unknown;
       }) => {
         const { branchName, path } = rawArgs;
-        const edits = parseIfStringified<{ search: string; replace: string }>(
-          rawArgs.edits
-        );
+        const parsedEdits = parseIfStringified<{
+          search: string;
+          replace: string;
+        }>(rawArgs.edits);
 
         if (!path?.trim()) {
           throw new Error('"path" must be a non-empty string.');
         }
-        if (!edits?.length) {
+        if (!parsedEdits?.length) {
           throw new Error(
             '"edits" must be a non-empty JSON array of { search, replace } objects.'
           );
         }
 
+        const edits = parsedEdits.map((edit) => ({
+          search:
+            typeof edit?.search === "string"
+              ? stripLineNumberPrefixes(edit.search)
+              : edit?.search,
+          replace: edit?.replace,
+        }));
+
+        assertEditScopeAllowed(path, ctx);
         for (const edit of edits) {
           assertSearchReadable(path, edit.search, ctx);
         }
@@ -683,6 +735,10 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
             "All change entries were invalid (missing path or content). " +
             "Each entry must have: path (string), content (string), action ('create' | 'update')."
           );
+        }
+
+        for (const change of validChanges) {
+          assertEditScopeAllowed(change.path, ctx);
         }
 
         await ensureBranchExists(
@@ -841,6 +897,25 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
         ctx.addProgress(
           `Captured verification diff: ${diffSummary.files.length} file(s), ${diffSummary.aheadBy} commit(s) ahead.`
         );
+
+        const primaryPaths = primaryPlanPaths(ctx.plan);
+        const changedPaths = patchFiles.map((f) => f.path);
+        if (
+          primaryPaths.length > 0 &&
+          !primaryPaths.some((primary) => changedPaths.includes(primary))
+        ) {
+          ctx.addProgress(
+            "Verification blocked: diff omits the planned target file(s)."
+          );
+          return {
+            success: false,
+            verificationFailed: true,
+            reason: `The diff changes ${changedPaths.join(", ") || "no files"} but none of the planned target file(s) ${primaryPaths.join(", ")}.`,
+            suggestedNext: `Implement the task in ${primaryPaths[0]} using grep_in_file then read_file_section then apply_file_edits before creating the PR.`,
+            changedFiles: changedPaths,
+          };
+        }
+
         const verification = await verifyTaskCompletion(
           env.AI,
           safeStr(ctx.request.description),
@@ -994,11 +1069,14 @@ async function ensureBranchExists(
 
 /**
  * Pick the most likely file the agent still needs to edit after a verification
- * failure. Prefers Next.js App Router / Pages Router home-page entry points that
- * the agent has seen (in repo structure or read cache) but not yet edited, then
- * falls back to any read-but-unedited file.
+ * failure. Prefers planned primary targets the agent has not edited yet, then
+ * Next.js App Router / Pages Router home-page entry points that the agent has
+ * seen, then falls back to any read-but-unedited file.
  */
 function pickRecoveryTarget(ctx: ReActContext): string | null {
+  for (const primary of primaryPlanPaths(ctx.plan)) {
+    if (!ctx.editedPaths.has(primary)) return primary;
+  }
   const homePageCandidates = [
     "app/page.tsx",
     "app/page.jsx",
@@ -1105,6 +1183,54 @@ export function buildAmbiguousEditRecoveryMessage(
     `SYSTEM: Your patch search in "${path}" was ambiguous at lines ${lines.join(", ")}. Do NOT retry the same search.`,
     `Read the candidate that implements the task: read_file_section("${path}", ${start}, ${end}).`,
     "Then retry apply_file_edits with a multi-line search copied from that read output, including a distinctive parent element and at least one surrounding line so it matches exactly once.",
+  ].join("\n");
+}
+
+/**
+ * Turn a "search string not found" / weak-anchor edit failure into a concrete
+ * re-read instruction. The model's search string drifted from the file (often
+ * by copying numbered output or guessing); force a fresh grep + read_section so
+ * the next anchor is verbatim and multi-line.
+ */
+export function buildSearchNotFoundRecoveryMessage(
+  path: string,
+  errorMessage: string
+): string | null {
+  const isSearchFailure =
+    errorMessage.includes("Search string not found") ||
+    errorMessage.includes("search string not found") ||
+    errorMessage.includes("Search anchor for");
+  if (!isSearchFailure) return null;
+  return [
+    `SYSTEM: Your apply_file_edits search for "${path}" did not match the file. Do NOT retry the same search.`,
+    `1. grep_in_file("${path}", "<|return \\\\(|className|style") to find the exact lines.`,
+    `2. read_file_section("${path}", <line near a match>, <that line + 40>).`,
+    "3. Copy 2+ consecutive lines from that output (without the \"123|\" line-number prefixes) into the search string so it matches exactly once.",
+  ].join("\n");
+}
+
+/**
+ * Build the message injected when the model stops emitting tool calls without
+ * opening a PR. Once a real edit is committed, the agent's most common failure
+ * is stalling instead of finishing — so push it directly at create_pull_request
+ * and let verification report what is missing. Before any edit, fall back to
+ * locate/read/edit guidance.
+ */
+export function buildContinueNudge(ctx: ReActContext): string {
+  if (ctx.editedPaths.size > 0) {
+    const edited = [...ctx.editedPaths].join(", ");
+    return [
+      `SYSTEM: You have already committed changes to ${edited} but have NOT opened the pull request.`,
+      "You are NOT done until create_pull_request succeeds. Call create_pull_request now with your working branch — do not reply with plain text.",
+      "Verification runs automatically and will tell you exactly what is missing. If it rejects the diff, fix that specific point with apply_file_edits, then call create_pull_request again.",
+    ].join("\n");
+  }
+  return [
+    "SYSTEM: You stopped without creating a pull request. You are NOT done until create_pull_request succeeds.",
+    "Do not reply with plain text — call a tool now.",
+    "- If your last tool call errored, fix the arguments and retry (e.g. apply_file_edits needs a non-empty edits array of { search, replace }).",
+    "- If you have not edited the real target file yet, use grep_in_file then read_file_section to load it, then apply_file_edits.",
+    "- Once a real change is committed, call create_pull_request.",
   ].join("\n");
 }
 
@@ -1272,6 +1398,8 @@ LOCATE + READ (critical for large files):
 APPLY_FILE_EDITS FORMAT:
 - Each edit: { "search": "exact substring from read output", "replace": "new text" }
 - search must match EXACTLY ONCE in the file
+- Copy 2+ consecutive lines into "search" for a distinctive anchor; a single short token like "<Box>" will be rejected.
+- Do NOT include the "123|" line-number prefixes from read_file_section output in the search string — copy only the code text.
 - Example:
   apply_file_edits({
     "branchName": "${suggestedBranchName}",
@@ -1386,15 +1514,7 @@ Treat the plan as an initial scope hypothesis, not a rigid file limit. Start wit
         ctx.addProgress(
           `Model returned no tool call but no PR exists yet — nudging it to continue (${noToolCallNudges}/${MAX_NO_TOOL_NUDGES}).`
         );
-        messages.push({
-          role: "user",
-          content:
-            "SYSTEM: You stopped without creating a pull request. You are NOT done until create_pull_request succeeds. " +
-            "Do not reply with plain text — call a tool now.\n" +
-            "- If your last tool call errored, fix the arguments and retry (e.g. apply_file_edits needs a non-empty edits array of { search, replace }).\n" +
-            "- If you have not edited the real target file yet, use grep_in_file then read_file_section to load it, then apply_file_edits.\n" +
-            "- Once a real change is committed, call create_pull_request.",
-        });
+        messages.push({ role: "user", content: buildContinueNudge(ctx) });
         continue;
       }
 
@@ -1508,10 +1628,12 @@ Treat the plan as an initial scope hypothesis, not a rigid file limit. Start wit
           if (call.name === "apply_file_edits") {
             const path = typeof args === "object" && args ? (args as { path?: unknown }).path : undefined;
             if (typeof path === "string") {
-              const recovery = buildAmbiguousEditRecoveryMessage(path, errMsg);
+              const recovery =
+                buildAmbiguousEditRecoveryMessage(path, errMsg) ??
+                buildSearchNotFoundRecoveryMessage(path, errMsg);
               if (recovery) {
                 recoveryMessage = recovery;
-                ctx.addProgress("Injecting recovery guidance after ambiguous file edit.");
+                ctx.addProgress("Injecting recovery guidance after failed file edit.");
               }
             }
           }

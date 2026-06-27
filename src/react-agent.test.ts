@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildAmbiguousEditRecoveryMessage,
+  buildContinueNudge,
+  buildSearchNotFoundRecoveryMessage,
   normalizeToolArguments,
   normalizeToolCall,
   rankFilesForTask,
@@ -28,6 +30,61 @@ describe("buildAmbiguousEditRecoveryMessage", () => {
       buildAmbiguousEditRecoveryMessage("app/page.js", "Search string not found"),
       null
     );
+  });
+});
+
+describe("buildSearchNotFoundRecoveryMessage", () => {
+  it("guides a fresh grep and read_section after a search miss", () => {
+    const message = buildSearchNotFoundRecoveryMessage(
+      "app/page.js",
+      "Search string not found in previously read content for \"app/page.js\"."
+    );
+    assert.ok(message);
+    assert.match(message!, /grep_in_file\("app\/page\.js"/);
+    assert.match(message!, /read_file_section\("app\/page\.js"/);
+    assert.match(message!, /line-number prefixes/);
+  });
+
+  it("also handles weak-anchor rejections", () => {
+    assert.ok(
+      buildSearchNotFoundRecoveryMessage(
+        "app/page.js",
+        'Search anchor for "app/page.js" is too weak (single short line).'
+      )
+    );
+  });
+
+  it("does not intercept unrelated errors", () => {
+    assert.equal(
+      buildSearchNotFoundRecoveryMessage("app/page.js", "Some other failure"),
+      null
+    );
+  });
+});
+
+describe("buildContinueNudge", () => {
+  const baseCtx = (editedPaths: Set<string>): ReActContext => ({
+    github: {} as ReActContext["github"],
+    repoInfo: { owner: "o", repo: "r" },
+    request: { repoUrl: "o/r", description: "Add dark mode to the home page", branchName: "feature/test" },
+    addProgress: () => {},
+    workingBranch: "feature/test",
+    readCache: new Map(),
+    fullFilePaths: new Set(),
+    editedPaths,
+    knownPaths: new Set(),
+  });
+
+  it("pushes directly at create_pull_request once a file is committed", () => {
+    const message = buildContinueNudge(baseCtx(new Set(["app/page.js"])));
+    assert.match(message, /already committed changes to app\/page\.js/);
+    assert.match(message, /create_pull_request now/);
+  });
+
+  it("falls back to locate/read/edit guidance before any edit", () => {
+    const message = buildContinueNudge(baseCtx(new Set()));
+    assert.match(message, /grep_in_file/);
+    assert.match(message, /apply_file_edits/);
   });
 });
 
@@ -192,7 +249,7 @@ describe("runReActAgent branch lifecycle", () => {
         createPullRequest: async () => ({ html_url: "https://example.test/pr/1", number: 1 }),
         compareCommits: async () => ({
           ahead_by: 1,
-          files: [{ filename: "change.txt", additions: 1, deletions: 0, patch: "+<Box sx={{ bgcolor: '#121212' }}>" }],
+          files: [{ filename: "app/page.js", additions: 1, deletions: 0, patch: "+<Box sx={{ bgcolor: '#121212' }}>" }],
         }),
         searchCode: async () => [],
       },
@@ -210,11 +267,11 @@ describe("runReActAgent branch lifecycle", () => {
       if ("prompt" in options) return { response: '{"pass":true}' };
       reactCalls++;
       return reactCalls === 1
-        ? { tool_calls: [{ name: "commit_files", arguments: { branchName: "feature/test", changes: [{ path: "change.txt", content: "done", action: "create" }] } }] }
+        ? { tool_calls: [{ name: "commit_files", arguments: { branchName: "feature/test", changes: [{ path: "app/page.js", content: "done", action: "create" }] } }] }
         : { tool_calls: [{ name: "create_pull_request", arguments: { branchName: "feature/test" } }] };
     } } } as any, ctx);
 
     assert.equal(result.success, true, JSON.stringify(result));
-    assert.deepEqual(capturedDiff?.files, [{ path: "change.txt", additions: 1, deletions: 0, patchPreview: "+<Box sx={{ bgcolor: '#121212' }}>" }]);
+    assert.deepEqual(capturedDiff?.files, [{ path: "app/page.js", additions: 1, deletions: 0, patchPreview: "+<Box sx={{ bgcolor: '#121212' }}>" }]);
   });
 });

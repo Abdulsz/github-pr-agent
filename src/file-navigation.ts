@@ -17,7 +17,10 @@ export interface FileSectionResult {
   endLine: number;
   totalLines: number;
   lineCount: number;
+  /** Numbered content (LINE|text) for model navigation. */
   content: string;
+  /** Unnumbered content suitable for read cache and exact search matching. */
+  rawContent: string;
 }
 
 /** Grep a file's content with match cap. */
@@ -65,5 +68,6 @@ export function readFileSectionContent(
     totalLines: range.totalLines,
     lineCount: range.lines.length,
     content: numbered,
+    rawContent: range.content,
   };
 }

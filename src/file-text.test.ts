@@ -5,6 +5,7 @@ import {
   isSearchInReadContent,
   readLineRange,
   splitLines,
+  stripLineNumberPrefixes,
 } from "./file-text";
 
 describe("splitLines", () => {
@@ -59,5 +60,31 @@ describe("isSearchInReadContent", () => {
 
   it("rejects search not in read content", () => {
     assert.equal(isSearchInReadContent("<Box>", "import React"), false);
+  });
+});
+
+describe("stripLineNumberPrefixes", () => {
+  it("removes leading LINE| prefixes when every line carries one", () => {
+    assert.equal(
+      stripLineNumberPrefixes("140|foo\n141|bar"),
+      "foo\nbar"
+    );
+  });
+
+  it("preserves indentation after the prefix", () => {
+    assert.equal(
+      stripLineNumberPrefixes("12|  return (\n13|    <Box>"),
+      "  return (\n    <Box>"
+    );
+  });
+
+  it("leaves genuine code with pipes untouched", () => {
+    const code = "const x = a | b;";
+    assert.equal(stripLineNumberPrefixes(code), code);
+  });
+
+  it("leaves search untouched when only some lines are numbered", () => {
+    const mixed = "140|foo\nplain line";
+    assert.equal(stripLineNumberPrefixes(mixed), mixed);
   });
 });

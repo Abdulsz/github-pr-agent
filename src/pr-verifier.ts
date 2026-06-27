@@ -166,6 +166,46 @@ function findMalformedAddedSyntax(files: PatchFile[]): string | null {
 }
 
 /**
+ * For a dark-mode task, detect diffs that look like dark mode but do not enable
+ * it: either they hard-code the palette to light, or they define a theme that
+ * is never applied via <ThemeProvider>. These are the two failure modes seen on
+ * Pantry runs (light-mode createTheme; theme object created but never wired up).
+ */
+function findIncompleteDarkMode(
+  task: string,
+  files: PatchFile[]
+): string | null {
+  if (!/\bdark\b/i.test(task)) return null;
+
+  const addedLines: string[] = [];
+  const contextLines: string[] = [];
+  for (const file of files) {
+    if (!file.patch) continue;
+    addedLines.push(...netAddedLines(file.patch));
+    contextLines.push(...getContextLines(file.patch));
+  }
+  if (addedLines.length === 0) return null;
+  const addedText = addedLines.join("\n");
+
+  const mentionsDark = /['"]dark['"]/.test(addedText) || /\bdark\b/i.test(addedText);
+  const setsLightMode = /mode\s*:\s*['"]light['"]/.test(addedText);
+  if (setsLightMode && !mentionsDark) {
+    return "The diff sets the theme palette mode to 'light' for a dark mode task — it does not enable a dark theme.";
+  }
+
+  const definesTheme =
+    /createTheme\s*\(/.test(addedText) || /\bdarkMode\b/.test(addedText);
+  const appliesTheme =
+    /<ThemeProvider\b/.test(addedText) ||
+    contextLines.some((line) => /<ThemeProvider\b/.test(line));
+  if (definesTheme && !appliesTheme) {
+    return "The diff defines a theme but never applies it (no <ThemeProvider> wraps the UI), so dark mode will not take effect.";
+  }
+
+  return null;
+}
+
+/**
  * True when a diff only reformats existing code (whitespace/indentation,
  * trailing newline, line reordering) without changing any real content. Such a
  * diff never implements a substantive task even though it may "touch" UI lines.
@@ -282,6 +322,16 @@ export function runDeterministicVerifier(
       reason: `${malformed} The edit appears truncated or syntactically broken.`,
       suggestedNext:
         "Re-read the target region with read_file_section, then apply_file_edits with a complete, balanced replacement (matching braces/brackets).",
+    };
+  }
+
+  const incompleteDarkMode = findIncompleteDarkMode(task, withPatches);
+  if (incompleteDarkMode) {
+    return {
+      pass: false,
+      reason: incompleteDarkMode,
+      suggestedNext:
+        "Apply a real dark theme: set the palette mode to 'dark' (or a dark-defaulting toggle) and wrap the rendered UI in <ThemeProvider theme={...}>, or apply dark background/text colors directly to the page's top-level element.",
     };
   }
 

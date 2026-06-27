@@ -116,6 +116,22 @@ export function isSearchInReadContent(search: string, readContent: string): bool
   return false;
 }
 
+/**
+ * Strip leading "LINE|" prefixes that models sometimes copy verbatim from
+ * numbered read_file_section output into apply_file_edits search strings.
+ * Only strips when every non-empty line carries a numeric prefix, so genuine
+ * code containing a pipe character is left untouched.
+ */
+export function stripLineNumberPrefixes(search: string): string {
+  const lines = search.split("\n");
+  const prefix = /^\s*\d+\|/;
+  const nonEmpty = lines.filter((line) => line.trim().length > 0);
+  if (nonEmpty.length === 0 || !nonEmpty.every((line) => prefix.test(line))) {
+    return search;
+  }
+  return lines.map((line) => line.replace(prefix, "")).join("\n");
+}
+
 /** Append new read content to the per-path cache. */
 export function appendToReadCache(
   cache: Map<string, string>,
