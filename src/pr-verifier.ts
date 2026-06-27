@@ -1,3 +1,5 @@
+import { extractWorkersAiText } from "./workers-ai-response";
+
 export interface PatchFile {
   path: string;
   patch?: string;
@@ -108,6 +110,61 @@ function netAddedLines(patch: string): string[] {
   return net;
 }
 
+/** Unchanged context lines in a unified diff (prefixed with a single space). */
+function getContextLines(patch: string): string[] {
+  const context: string[] = [];
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@") || line.startsWith("+") || line.startsWith("-")) continue;
+    if (line.startsWith(" ")) {
+      const body = line.slice(1).trim();
+      if (body) context.push(body);
+    }
+  }
+  return context;
+}
+
+/**
+ * Detect a diff that re-inserts a near-duplicate of code that already exists in
+ * the surrounding unchanged context. This is the PR #14 failure: the model
+ * added a partial copy of the JSX block sitting right below it instead of
+ * editing the existing block. Such a diff "adds UI markers" but produces broken,
+ * duplicated output.
+ */
+function hasDuplicateInsertion(files: PatchFile[]): boolean {
+  for (const file of files) {
+    if (!file.patch) continue;
+    const added = netAddedLines(file.patch)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (added.length < 3) continue;
+    const context = new Set(getContextLines(file.patch));
+    if (context.size === 0) continue;
+    const duplicated = added.filter((l) => context.has(l)).length;
+    if (duplicated >= 3 && duplicated / added.length >= 0.5) return true;
+  }
+  return false;
+}
+
+/**
+ * Detect obviously malformed code in added lines — a strong signal the edit was
+ * truncated or syntactically broken (e.g. `style={{}` instead of `style={{...}}`,
+ * or a single added line with unbalanced parentheses). Kept deliberately narrow
+ * to avoid rejecting legitimate multi-line edits whose closing token sits in
+ * unchanged context.
+ */
+function findMalformedAddedSyntax(files: PatchFile[]): string | null {
+  for (const file of files) {
+    if (!file.patch) continue;
+    for (const line of netAddedLines(file.patch)) {
+      // `{{}` that is not a complete `{{}}` — e.g. the broken `style={{}`.
+      if (/\{\{\}(?!\})/.test(line)) {
+        return `Added line contains malformed JSX expression ("${line.trim().slice(0, 60)}").`;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * True when a diff only reformats existing code (whitespace/indentation,
  * trailing newline, line reordering) without changing any real content. Such a
@@ -208,6 +265,26 @@ export function runDeterministicVerifier(
     };
   }
 
+  if (hasDuplicateInsertion(withPatches)) {
+    return {
+      pass: false,
+      reason:
+        "Diff inserts a near-duplicate of code that already exists in the surrounding context, rather than editing the existing block.",
+      suggestedNext:
+        "Do NOT re-add an existing block. Use read_file_section to load the exact lines, then apply_file_edits with a multi-line search that matches the existing code and a replace that modifies it in place.",
+    };
+  }
+
+  const malformed = findMalformedAddedSyntax(withPatches);
+  if (malformed) {
+    return {
+      pass: false,
+      reason: `${malformed} The edit appears truncated or syntactically broken.`,
+      suggestedNext:
+        "Re-read the target region with read_file_section, then apply_file_edits with a complete, balanced replacement (matching braces/brackets).",
+    };
+  }
+
   let totalAdded = 0;
   let totalRemoved = 0;
   const allPatches = withPatches.map((f) => f.patch!).join("\n");
@@ -258,7 +335,7 @@ export function runDeterministicVerifier(
   return { pass: true };
 }
 
-const VERIFIER_MODEL_ID = "@cf/meta/llama-3.1-8b-instruct-fp8";
+const VERIFIER_MODEL_ID = "@cf/zai-org/glm-4.7-flash";
 
 function parseVerifierJson(text: string): VerifyResult | null {
   const trimmed = text.trim();
@@ -328,12 +405,7 @@ Rules:
       max_tokens: 512,
     });
 
-    const text =
-      typeof response === "string"
-        ? response
-        : response != null
-        ? String((response as { response?: string }).response ?? response)
-        : "";
+    const text = extractWorkersAiText(response);
 
     const parsed = parseVerifierJson(text);
     if (parsed) return parsed;

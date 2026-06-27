@@ -29,6 +29,10 @@ import {
   readFileSectionContent,
 } from "./file-navigation";
 import { verifyTaskCompletion } from "./pr-verifier";
+import {
+  extractWorkersAiText,
+  extractWorkersAiToolCalls,
+} from "./workers-ai-response";
 
 /** Safe string for prompts/display; Workers AI or clients may send non-string. */
 function safeStr(value: unknown): string {
@@ -55,6 +59,34 @@ function parseIfStringified<T>(value: unknown): T[] | null {
     }
   }
   return null;
+}
+
+/**
+ * Workers AI returns tool calls in more than one shape. Native (llama) calls
+ * arrive flat as `{ name, arguments }`, but OpenAI-compatible responses nest
+ * them under `{ function: { name, arguments } }` and frequently stringify the
+ * arguments. Reading the flat fields directly yields `name: undefined`, which
+ * the loop reports as "Unknown tool requested by model: undefined" and burns
+ * steps. Normalize every call into `{ name, arguments }` with parsed args.
+ */
+export function normalizeToolCall(call: unknown): { name: string; arguments: any } | null {
+  if (!call || typeof call !== "object") return null;
+  const record = call as Record<string, any>;
+  const fn = record.function && typeof record.function === "object" ? record.function : undefined;
+
+  const name = fn?.name ?? record.name ?? record.tool_name;
+  if (typeof name !== "string" || !name) return null;
+
+  let rawArgs = fn?.arguments ?? record.arguments ?? record.parameters ?? {};
+  if (typeof rawArgs === "string") {
+    const trimmed = rawArgs.trim();
+    try {
+      rawArgs = trimmed ? JSON.parse(trimmed) : {};
+    } catch {
+      // Leave as the raw string; downstream parsing/validation will surface it.
+    }
+  }
+  return { name, arguments: rawArgs };
 }
 
 /** Unwrap the { type, value } scalar shape occasionally emitted by the model. */
@@ -868,7 +900,7 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
 
 export type ReActTools = ReturnType<typeof createReActTools>;
 
-const REACT_MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const REACT_MODEL_ID = "@cf/zai-org/glm-4.7-flash";
 const MAX_STEPS = 30;
 /** Max consecutive identical tool calls before we inject a nudge message. */
 const MAX_REPEATED_CALLS = 2;
@@ -1315,22 +1347,29 @@ Treat the plan as an initial scope hypothesis, not a rigid file limit. Start wit
       const result = await callModelWithRetry(env.AI, REACT_MODEL_ID, {
         messages,
         tools: toolSpecs,
+        tool_choice: "auto",
         max_tokens: 8192,
       });
 
-      const responseText =
-        typeof result.response === "string"
-          ? result.response
-          : result.response != null
-          ? String(result.response)
-          : "";
+      const responseText = extractWorkersAiText(result);
 
       if (responseText) {
         messages.push({ role: "assistant", content: responseText });
       }
 
-      const toolCalls: { name: string; arguments: any }[] =
-        Array.isArray(result.tool_calls) ? result.tool_calls : [];
+      const rawToolCalls = extractWorkersAiToolCalls(result);
+      const toolCalls: { name: string; arguments: any }[] = [];
+      let droppedToolCalls = 0;
+      for (const raw of rawToolCalls) {
+        const normalized = normalizeToolCall(raw);
+        if (normalized) toolCalls.push(normalized);
+        else droppedToolCalls++;
+      }
+      if (droppedToolCalls > 0) {
+        ctx.addProgress(
+          `Ignored ${droppedToolCalls} malformed tool call(s) missing a tool name.`
+        );
+      }
 
       if (!toolCalls.length) {
         // The model stopped calling tools. Only treat this as "done" if a PR

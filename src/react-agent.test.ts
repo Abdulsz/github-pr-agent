@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildAmbiguousEditRecoveryMessage,
   normalizeToolArguments,
+  normalizeToolCall,
   rankFilesForTask,
   resolveReadRef,
   runReActAgent,
@@ -47,6 +48,31 @@ describe("normalizeToolArguments", () => {
         edits: [{ search: "before", replace: "after" }],
       }
     );
+  });
+});
+
+describe("normalizeToolCall", () => {
+  it("reads the flat { name, arguments } shape", () => {
+    assert.deepEqual(
+      normalizeToolCall({ name: "read_file", arguments: { path: "app/page.js" } }),
+      { name: "read_file", arguments: { path: "app/page.js" } }
+    );
+  });
+
+  it("unwraps the OpenAI-style nested function with stringified arguments", () => {
+    assert.deepEqual(
+      normalizeToolCall({
+        type: "function",
+        function: { name: "apply_file_edits", arguments: '{"path":"app/page.js","edits":[]}' },
+      }),
+      { name: "apply_file_edits", arguments: { path: "app/page.js", edits: [] } }
+    );
+  });
+
+  it("returns null when no tool name is present (avoids undefined tool calls)", () => {
+    assert.equal(normalizeToolCall({ arguments: { path: "x" } }), null);
+    assert.equal(normalizeToolCall({ function: { arguments: "{}" } }), null);
+    assert.equal(normalizeToolCall(null), null);
   });
 });
 

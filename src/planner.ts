@@ -10,12 +10,13 @@
  */
 
 import type { TaskPlan } from "./types";
+import { extractWorkersAiText } from "./workers-ai-response";
 
 /**
  * Planner model. Same catalog model as the executor for now; swap to an
  * agentic-coding model (e.g. "@cf/zai-org/glm-5.2") when validated.
  */
-const PLANNER_MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const PLANNER_MODEL_ID = "@cf/zai-org/glm-4.7-flash";
 /** Cap the file list injected into the planner prompt to bound tokens. */
 const MAX_PLAN_FILES = 200;
 
@@ -203,12 +204,7 @@ Rules:
       run: (model: string, opts: Record<string, unknown>) => Promise<unknown>;
     }).run(PLANNER_MODEL_ID, { prompt, max_tokens: 1024 });
 
-    const text =
-      typeof res === "string"
-        ? res
-        : res != null
-        ? String((res as { response?: string }).response ?? res)
-        : "";
+    const text = extractWorkersAiText(res);
 
     return parsePlanJson(text) ?? fallbackPlan(task);
   } catch {
