@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { runDeterministicVerifier } from "./pr-verifier";
+import { findUndeclaredImports, runDeterministicVerifier } from "./pr-verifier";
 
 const PR10_PATCH = `@@ -24,7 +24,7 @@ import {
  import Webcam from "react-webcam";
@@ -95,6 +95,53 @@ const THEME_NOT_APPLIED_PATCH = `@@ -38,6 +41,16 @@ export default function Home
 +    },
 +  });`;
 
+describe("findUndeclaredImports", () => {
+  const DEPS = ["@mui/material", "firebase", "next", "react", "react-dom"];
+
+  it("flags an added import from a package missing in package.json (the PR #17 case)", () => {
+    const patch = `@@ -11,6 +11,8 @@ import {
+   Container,
+ } from "@mui/material";
++import ClearIcon from "@mui/icons-material/Clear";`;
+    const result = findUndeclaredImports([{ path: "app/page.js", patch }], DEPS);
+    assert.ok(result);
+    assert.match(result!, /@mui\/icons-material/);
+  });
+
+  it("allows declared packages, their subpaths, path aliases, and relative imports", () => {
+    const patch = `@@ -1,3 +1,7 @@
++import { getDoc } from "firebase/firestore";
++import { Box } from "@mui/material";
++import { helper } from "@/lib/helper";
++import local from "./local";`;
+    assert.equal(findUndeclaredImports([{ path: "app/page.js", patch }], DEPS), null);
+  });
+
+  it("skips the check when no dependency list is available", () => {
+    const patch = `+import X from "not-installed";`;
+    assert.equal(findUndeclaredImports([{ path: "app/page.js", patch }], undefined), null);
+  });
+
+  it("is exposed through runDeterministicVerifier", () => {
+    const patch = `@@ -145,7 +145,8 @@ export default function Home() {
+   return (
+-    <Box>
++    <Box sx={{ bgcolor: '#121212' }}>
++      <ClearIcon />
+@@ -11,6 +11,7 @@ import {
++import ClearIcon from "@mui/icons-material/Clear";`;
+    const result = runDeterministicVerifier(
+      "Add dark mode to the home page",
+      [{ path: "app/page.js", patch }],
+      DEPS
+    );
+    assert.equal(result.pass, false);
+    if (!result.pass) {
+      assert.match(result.reason, /@mui\/icons-material/);
+    }
+  });
+});
+
 describe("runDeterministicVerifier", () => {
   it("rejects PR #10-style trivial non-UI firebase edit for dark mode task", () => {
     const result = runDeterministicVerifier(
@@ -103,7 +150,7 @@ describe("runDeterministicVerifier", () => {
     );
     assert.equal(result.pass, false);
     if (!result.pass) {
-      assert.match(result.reason, /trivial|UI-related|imports/i);
+      assert.match(result.reason, /trivial|UI-related|imports|no dark styling/i);
     }
   });
 
@@ -184,6 +231,68 @@ describe("runDeterministicVerifier", () => {
       [{ path: "app/page.js", patch }]
     );
     assert.equal(result.pass, true);
+  });
+
+  it("rejects state + toggle handler with JSX untouched (the half-wired live-run shape)", () => {
+    const patch = `@@ -38,6 +41,8 @@ export default function Home() {
+   const [uploading, setUploading] = useState(false);
++  const [darkMode, setDarkMode] = useState(false);
++
++  const handleDarkModeToggle = () => setDarkMode((prev) => !prev);`;
+    const result = runDeterministicVerifier(
+      "Add dark mode to the home page",
+      [{ path: "app/page.js", patch }]
+    );
+    assert.equal(result.pass, false);
+    if (!result.pass) {
+      assert.match(result.reason, /never applies|no visible effect/i);
+    }
+  });
+
+  it("passes dark styling applied directly via sx with a darkMode state (no ThemeProvider)", () => {
+    const patch = `@@ -38,6 +41,7 @@ export default function Home() {
+   const [uploading, setUploading] = useState(false);
++  const [darkMode, setDarkMode] = useState(true);
+@@ -145,7 +149,7 @@ export default function Home() {
+   return (
+-    <Box>
++    <Box sx={{ bgcolor: darkMode ? '#121212' : '#fff', color: darkMode ? '#fff' : '#000', minHeight: '100vh' }}>
+       <Typography variant="h4">Pantry</Typography>`;
+    const result = runDeterministicVerifier(
+      "Add dark mode to the home page",
+      [{ path: "app/page.js", patch }]
+    );
+    assert.equal(result.pass, true, JSON.stringify(result));
+  });
+
+  it("rejects a dark-mode task whose added lines contain no dark styling at all", () => {
+    const patch = `@@ -145,7 +145,7 @@ export default function Home() {
+   return (
+-    <Box>
++    <Box sx={{ padding: 2 }}>
+       <Typography variant="h4">Pantry</Typography>`;
+    const result = runDeterministicVerifier(
+      "Add dark mode to the home page",
+      [{ path: "app/page.js", patch }]
+    );
+    assert.equal(result.pass, false);
+    if (!result.pass) {
+      assert.match(result.reason, /no dark styling/i);
+    }
+  });
+
+  it("rejects unwired appearance state on a non-dark UI task", () => {
+    const patch = `@@ -38,6 +41,7 @@ export default function Home() {
+   const [uploading, setUploading] = useState(false);
++  const [bgColor, setBgColor] = useState('#ffffff');`;
+    const result = runDeterministicVerifier(
+      "Change the page background color",
+      [{ path: "app/page.js", patch }]
+    );
+    assert.equal(result.pass, false);
+    if (!result.pass) {
+      assert.match(result.reason, /never uses it|no visible effect/i);
+    }
   });
 
   it("rejects getStorage without import", () => {

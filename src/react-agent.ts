@@ -170,12 +170,25 @@ export interface ReActContext {
   recordDiff?: (diff: DiffSummary) => void;
   /** True once the working branch exists on the remote (lazy branch lifecycle). */
   branchMaterialized?: boolean;
+  /**
+   * Signature of the last diff rejected by verification. Re-submitting the
+   * identical diff is bounced immediately without consuming the verify-retry
+   * budget — the budget measures real fix attempts, not stubborn resubmission.
+   */
+  lastRejectedDiffSignature?: string;
 }
 
-/** Resolve which git ref to read from before opening files. */
+/**
+ * Resolve which git ref to read from before opening files. Before the working
+ * branch exists, everything reads from the target branch. Once the branch is
+ * materialized (i.e. the agent has committed to it), default reads MUST come
+ * from the working branch — otherwise post-edit greps/reads reflect stale
+ * pre-edit content and the next apply_file_edits search-misses against the
+ * branch it actually patches.
+ */
 export function resolveReadRef(ctx: ReActContext, ref?: string): string {
   const target = ctx.request.targetBranch || "main";
-  if (!ref) return target;
+  if (!ref) return ctx.branchMaterialized ? ctx.workingBranch : target;
   if (ref === ctx.workingBranch && !ctx.branchMaterialized) return target;
   return ref;
 }
@@ -229,8 +242,15 @@ function suggestKnownPaths(missingPath: string, ctx: ReActContext): string {
   return ` Valid paths you can use include: ${list.join(", ")}.`;
 }
 
-/** Minimum trimmed length for an acceptable single-line search anchor. */
-const MIN_SINGLE_LINE_ANCHOR_CHARS = 40;
+/**
+ * Minimum trimmed length for an acceptable single-line search anchor. Kept in
+ * sync with file-edits' MIN_LINE_TRIM_SINGLE_LINE_CHARS: apply-time matching
+ * already requires the search to match exactly once in the real file, so this
+ * pre-gate only needs to reject ultra-short tokens ("<Box>") that are near
+ * certain to be ambiguous — a stricter bar just burns steps on models that
+ * won't produce long anchors (live runs 6-7 lost 3+ steps each to it).
+ */
+const MIN_SINGLE_LINE_ANCHOR_CHARS = 20;
 
 /**
  * Reject fragile single-token anchors (e.g. "<Box>") that match ambiguously or
@@ -253,7 +273,9 @@ function assertSearchAnchorQuality(
   throw new Error(
     `Search anchor for "${path}" is too weak (single short line). ` +
       `Use grep_in_file to locate the code, read_file_section around it, then copy 2+ consecutive lines ` +
-      `(without the "123|" line-number prefixes) into the search string so it matches exactly once.`
+      `(without the "123|" line-number prefixes) into the search string so it matches exactly once. ` +
+      `Example of a good edit: {"search": "      <Box\\n        width=\\"100%\\"", "replace": "      <Box\\n        width=\\"100%\\"\\n        sx={{ bgcolor: '#121212' }}"} — ` +
+      `note the \\n joining consecutive lines copied verbatim from the read output.`
   );
 }
 
@@ -650,6 +672,11 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
         );
 
         ctx.editedPaths.add(path);
+        // The committed file no longer matches earlier reads. Replace the read
+        // cache with the merged result (and mark it fully read) so follow-up
+        // edits validate against the branch's current content, not stale text.
+        ctx.readCache.set(path, merged);
+        ctx.fullFilePaths.add(path);
         ctx.addProgress(`${path} updated successfully via apply_file_edits`);
         return {
           success: true,
@@ -807,6 +834,8 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
               sha
             );
             ctx.editedPaths.add(change.path);
+            ctx.readCache.set(change.path, change.content);
+            ctx.fullFilePaths.add(change.path);
             results.push({ path: change.path, status: "ok" });
             ctx.addProgress(`${change.path} committed successfully`);
           } catch (e) {
@@ -898,6 +927,25 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
           `Captured verification diff: ${diffSummary.files.length} file(s), ${diffSummary.aheadBy} commit(s) ahead.`
         );
 
+        const diffSignature = JSON.stringify(
+          patchFiles.map((f) => [f.path, f.patch ?? ""])
+        );
+        if (ctx.lastRejectedDiffSignature === diffSignature) {
+          ctx.addProgress(
+            "PR blocked: diff is unchanged since the last verification rejection."
+          );
+          return {
+            success: false,
+            verificationFailed: true,
+            diffUnchanged: true,
+            reason:
+              "You have not changed ANY code since verification rejected this exact diff. Re-submitting the same diff cannot succeed.",
+            suggestedNext:
+              "Make the fix first (read_file_section around the page's rendered JSX, then apply_file_edits), and only then call create_pull_request.",
+            changedFiles: patchFiles.map((f) => f.path),
+          };
+        }
+
         const primaryPaths = primaryPlanPaths(ctx.plan);
         const changedPaths = patchFiles.map((f) => f.path);
         if (
@@ -907,6 +955,7 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
           ctx.addProgress(
             "Verification blocked: diff omits the planned target file(s)."
           );
+          ctx.lastRejectedDiffSignature = diffSignature;
           return {
             success: false,
             verificationFailed: true,
@@ -916,17 +965,33 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
           };
         }
 
+        // Read package.json from the HEAD branch (includes this run's edits)
+        // so newly added imports are checked against the diff's own dependency
+        // changes. Absent/unparseable package.json disables the check.
+        let declaredDependencies: string[] | undefined;
+        try {
+          const pkg = JSON.parse(await fetchFileText(ctx, "package.json", branchName));
+          declaredDependencies = [
+            ...Object.keys(pkg.dependencies ?? {}),
+            ...Object.keys(pkg.devDependencies ?? {}),
+          ];
+        } catch {
+          declaredDependencies = undefined;
+        }
+
         const verification = await verifyTaskCompletion(
           env.AI,
           safeStr(ctx.request.description),
           patchFiles,
-          ctx.plan?.acceptanceCriteria
+          ctx.plan?.acceptanceCriteria,
+          declaredDependencies
         );
         if (!verification.pass) {
           // Return a structured, non-terminal failure so the control loop can
           // inject targeted recovery guidance and let the agent try again,
           // rather than surfacing this as a generic (potentially terminal) error.
           ctx.addProgress(`Verification failed: ${verification.reason}`);
+          ctx.lastRejectedDiffSignature = diffSignature;
           return {
             success: false,
             verificationFailed: true,
@@ -975,14 +1040,45 @@ function createReActTools(ctx: ReActContext, env: { AI: Ai }): ReActTool[] {
 
 export type ReActTools = ReturnType<typeof createReActTools>;
 
-const REACT_MODEL_ID = "@cf/zai-org/glm-4.7-flash";
-const MAX_STEPS = 30;
+/**
+ * Executor model. Live A/B results (2026-07-03):
+ * - GLM-4.7-Flash: stalls (no tool calls), weak single-token anchors, drifts
+ *   to layout files — never lands a complete edit.
+ * - GLM-5.2: strongest quality but inference exceeds the Workers AI gateway
+ *   timeout (504) on nearly every turn, even with max_tokens capped.
+ * - llama-3.3-70b-fp8-fast: fast, lands first edits, but never performs the
+ *   verifier-guided FIX edit — it stalls or re-submits the rejected diff
+ *   (runs 6-8).
+ * - kimi-k2.7-code: code-specialized agentic model, OpenAI-compatible shape
+ *   (handled by the normalizer). Current executor.
+ */
+const REACT_MODEL_ID = "@cf/moonshotai/kimi-k2.7-code";
+/**
+ * Fallback executor when the primary model is unavailable after retries
+ * (1031 upstream failures, 504s, rate-limit exhaustion). Live runs show
+ * individual Workers AI models have capacity episodes; one model's outage
+ * must not kill a run mid-flight.
+ */
+const REACT_MODEL_FALLBACK_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+/**
+ * Step budget. 30 starved run 9: a thorough executor spends ~3 steps per edit
+ * (grep → read_section → apply) and a real multi-edit change plus recovery
+ * turns needs headroom. The wrap-up nudge below keeps long runs from ending
+ * without a PR attempt.
+ */
+const MAX_STEPS = 60;
+/** With this many steps left (and edits committed), push the model to ship. */
+const WRAP_UP_STEPS_REMAINING = 8;
 /** Max consecutive identical tool calls before we inject a nudge message. */
 const MAX_REPEATED_CALLS = 2;
 /** Max times create_pull_request can fail verification before we give up. */
 const MAX_VERIFY_RETRIES = 3;
-/** Max times the model may stop emitting tool calls (without a PR) before we give up. */
-const MAX_NO_TOOL_NUDGES = 3;
+/**
+ * Max times the model may stop emitting tool calls (without a PR) before we
+ * give up. Nudge turns are cheap and live runs show models often resume on the
+ * 2nd-4th prod, so this is deliberately generous.
+ */
+const MAX_NO_TOOL_NUDGES = 5;
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -1006,18 +1102,28 @@ async function callModelWithRetry(
       lastError = error;
       const msg = error instanceof Error ? error.message : String(error);
       // Handle transient upstream/502-style failures with a short backoff.
+      // Per-minute rate limits (3021) need to wait out the window — a short
+      // backoff burns every retry inside the same minute and kills the run.
+      const isRateLimited =
+        msg.includes("3021") || msg.toLowerCase().includes("rate limit");
       const isTransient =
+        isRateLimited ||
         msg.includes("502") ||
+        msg.includes("503") ||
+        msg.includes("504") ||
         msg.includes("Bad Gateway") ||
+        msg.includes("Gateway Time-out") ||
+        msg.includes("Gateway Timeout") ||
+        msg.toLowerCase().includes("timed out") ||
+        msg.toLowerCase().includes("timeout") ||
         msg.includes("upstream") ||
         msg.includes("temporarily") ||
         msg.includes("1031") ||
-        msg.includes("overloaded") ||
-        msg.includes("rate limit");
+        msg.includes("overloaded");
       if (!isTransient || attempt === maxRetries) {
         throw error;
       }
-      const delay = 1000 * (attempt + 1);
+      const delay = (isRateLimited ? 20000 : 1000) * (attempt + 1);
       console.warn(
         `Workers AI call failed (attempt ${attempt + 1}/${maxRetries + 1}): ${msg} - retrying in ${delay}ms`
       );
@@ -1100,10 +1206,17 @@ function pickRecoveryTarget(ctx: ReActContext): string | null {
 
 /**
  * Build a targeted recovery message for the agent after create_pull_request
- * fails verification. Combines the verifier's reason/suggestedNext with a
- * concrete file target and ready-to-run grep/read/edit commands.
+ * fails verification. Two modes:
+ *
+ * 1. Fix-in-place: the diff already touches the planned target file(s) but the
+ *    implementation is incomplete (e.g. state added but never wired into JSX).
+ *    Telling the model to edit a file it has "NOT edited yet" here is wrong and
+ *    derails recovery — instead, direct it to finish the change in the SAME
+ *    file, using the verifier's reason/suggestedNext as the concrete fix.
+ * 2. Missing-target: the diff omits the real target entirely; steer the agent
+ *    to locate/read/edit it.
  */
-function buildRecoveryMessage(
+export function buildRecoveryMessage(
   ctx: ReActContext,
   reason: string,
   suggestedNext: string,
@@ -1111,12 +1224,33 @@ function buildRecoveryMessage(
   attempt: number,
   maxAttempts: number
 ): string {
-  const target = pickRecoveryTarget(ctx);
-  const lines = [
+  const header = [
     `SYSTEM: Your pull request was REJECTED by verification (attempt ${attempt}/${maxAttempts}). A PR was NOT created.`,
     `Reason: ${reason}`,
     `Suggested next step: ${suggestedNext}`,
     "",
+  ];
+
+  const primary = primaryPlanPaths(ctx.plan);
+  const fixInPlaceTargets = primary.length
+    ? changedFiles.filter((file) => primary.includes(file))
+    : changedFiles.filter((file) => ctx.editedPaths.has(file));
+
+  if (fixInPlaceTargets.length > 0) {
+    const target = fixInPlaceTargets[0];
+    return [
+      ...header,
+      `You ALREADY edited the correct file (${fixInPlaceTargets.join(", ")}), but the change is INCOMPLETE. Do NOT switch to another file. Finish the implementation in "${target}":`,
+      `1. grep_in_file("${target}", "return \\\\(") to find the component's rendered JSX.`,
+      `2. read_file_section("${target}", <first match line - 2>, <that line + 60>) — this shows the CURRENT branch content including your earlier edit.`,
+      `3. apply_file_edits on "${target}" to complete the change exactly as the reason above describes (e.g. wire the state into the JSX via <ThemeProvider theme={...}> or sx={{ bgcolor: ... }} on the top-level element). Copy the search string verbatim from step 2's output.`,
+      `4. Then call create_pull_request again — verification will re-check the diff and confirm the fix.`,
+    ].join("\n");
+  }
+
+  const target = pickRecoveryTarget(ctx);
+  const lines = [
+    ...header,
     `Diff so far only touched: ${changedFiles.length ? changedFiles.join(", ") : "(no files)"}.`,
     "Do NOT call create_pull_request again until you have made a real change that implements the task.",
   ];
@@ -1135,6 +1269,45 @@ function buildRecoveryMessage(
     );
   }
   return lines.join("\n");
+}
+
+/**
+ * Injected when the model re-calls create_pull_request with a diff identical
+ * to one verification already rejected (run 8 pathology: it burned the whole
+ * retry budget re-submitting the same diff instead of fixing it). Does not
+ * consume the verify-retry budget; directs the model to the fix instead.
+ */
+export function buildUnchangedDiffNudge(
+  ctx: ReActContext,
+  changedFiles: string[]
+): string {
+  const target =
+    changedFiles.find((f) => ctx.editedPaths.has(f)) ??
+    changedFiles[0] ??
+    primaryPlanPaths(ctx.plan)[0] ??
+    "the target file";
+  return [
+    "SYSTEM: You called create_pull_request again WITHOUT changing any code since the last rejection. That can NEVER succeed. It did not count as a retry.",
+    "Your next tool call MUST NOT be create_pull_request. Do this now:",
+    `1. grep_in_file("${target}", "return \\\\(")`,
+    `2. read_file_section("${target}", <first match line - 2>, <that line + 60>)`,
+    `3. apply_file_edits on "${target}" applying the requested change to the page's TOP-LEVEL rendered JSX (e.g. sx={{ bgcolor: '#121212', color: '#fff', minHeight: '100vh' }} on the outermost <Box>), with the search string copied verbatim from step 2.`,
+    "4. Only after that edit succeeds, call create_pull_request again.",
+  ].join("\n");
+}
+
+/**
+ * Injected after the agent commits a fix following a verification failure.
+ * Without this, the model tends to keep exploring (or stall) instead of
+ * re-attempting the PR, and the run dies with a committed-but-unshipped fix.
+ */
+export function buildPrRetryNudge(ctx: ReActContext): string {
+  const edited = [...ctx.editedPaths].join(", ");
+  return [
+    `SYSTEM: Your follow-up fix was committed successfully (files changed this run: ${edited}).`,
+    `Call create_pull_request NOW with branch "${ctx.workingBranch}" — verification will re-check the full diff and confirm whether the fix is complete.`,
+    "Do not make further exploratory edits first, and do not reply with plain text.",
+  ].join("\n");
 }
 
 const MAX_DIFF_PREVIEW_CHARS = 1_200;
@@ -1425,6 +1598,7 @@ FILE UPDATE RULES:
 
 ERROR RECOVERY:
 - If create_pull_request fails verification, follow suggestedNext (grep → read_file_section → apply_file_edits).
+- After your first commit, read_file / grep_in_file / read_file_section return the CURRENT state of your working branch (including your own earlier edits) — re-read before editing the same region again.
 - If commit_files is rejected as truncated, switch to apply_file_edits.
 - NEVER repeat the same failing tool call with the same arguments.
 
@@ -1472,12 +1646,43 @@ Treat the plan as an initial scope hypothesis, not a rigid file limit. Start wit
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
-      const result = await callModelWithRetry(env.AI, REACT_MODEL_ID, {
+      // Nearly out of steps with real edits committed: stop polishing and
+      // ship. Verification decides whether the change is complete — running
+      // the budget to zero mid-refinement wastes an otherwise-good run.
+      if (
+        step === MAX_STEPS - WRAP_UP_STEPS_REMAINING &&
+        ctx.editedPaths.size > 0 &&
+        !prOutput?.success
+      ) {
+        ctx.addProgress("Step budget low — nudging the model to create the PR now.");
+        messages.push({
+          role: "user",
+          content: [
+            "SYSTEM: Your step budget is nearly exhausted. STOP refining.",
+            `Call create_pull_request NOW with branch "${ctx.workingBranch}". Verification will tell you if anything essential is missing.`,
+          ].join("\n"),
+        });
+      }
+      // Keep max_tokens modest: an executor turn only needs a short thought +
+      // one tool call. Large caps let reasoning models generate for so long
+      // that the Workers AI gateway 504s before inference completes.
+      const modelOptions = {
         messages,
         tools: toolSpecs,
         tool_choice: "auto",
-        max_tokens: 8192,
-      });
+        max_tokens: 2048,
+      };
+      let result: any;
+      try {
+        result = await callModelWithRetry(env.AI, REACT_MODEL_ID, modelOptions);
+      } catch (primaryError) {
+        const msg =
+          primaryError instanceof Error ? primaryError.message : String(primaryError);
+        ctx.addProgress(
+          `Executor model ${REACT_MODEL_ID} unavailable (${msg.slice(0, 120)}); falling back to ${REACT_MODEL_FALLBACK_ID}.`
+        );
+        result = await callModelWithRetry(env.AI, REACT_MODEL_FALLBACK_ID, modelOptions);
+      }
 
       const responseText = extractWorkersAiText(result);
 
@@ -1587,9 +1792,40 @@ Treat the plan as an initial scope hypothesis, not a rigid file limit. Start wit
             content: JSON.stringify(output),
           });
 
+          // P0: after a verification failure, the moment a follow-up edit lands
+          // push the model straight back to create_pull_request. Left alone it
+          // keeps exploring or stalls, and the committed fix never ships.
+          if (
+            (call.name === "apply_file_edits" || call.name === "commit_files") &&
+            verifyFailures > 0 &&
+            !giveUpAfterVerify
+          ) {
+            const out = output as any;
+            const editLanded =
+              call.name === "apply_file_edits"
+                ? out?.success === true
+                : (out?.successCount ?? 0) > 0;
+            if (editLanded) {
+              recoveryMessage = buildPrRetryNudge(ctx);
+              ctx.addProgress(
+                "Fix committed after verification failure — nudging immediate PR retry."
+              );
+            }
+          }
+
           if (call.name === "create_pull_request" && output && typeof output === "object") {
             const out = output as any;
-            if (out.verificationFailed) {
+            if (out.verificationFailed && out.diffUnchanged) {
+              // Identical diff re-submitted: redirect without consuming the
+              // verify-retry budget, which measures real fix attempts.
+              recoveryMessage = buildUnchangedDiffNudge(
+                ctx,
+                Array.isArray(out.changedFiles) ? out.changedFiles : []
+              );
+              ctx.addProgress(
+                "Injecting unchanged-diff guidance (verify budget not consumed)."
+              );
+            } else if (out.verificationFailed) {
               verifyFailures++;
               if (verifyFailures > MAX_VERIFY_RETRIES) {
                 giveUpAfterVerify = true;

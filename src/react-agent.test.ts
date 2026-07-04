@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildAmbiguousEditRecoveryMessage,
   buildContinueNudge,
+  buildPrRetryNudge,
+  buildRecoveryMessage,
   buildSearchNotFoundRecoveryMessage,
   normalizeToolArguments,
   normalizeToolCall,
@@ -12,6 +14,7 @@ import {
   summarizeCompareDiff,
 } from "./react-agent";
 import type { ReActContext } from "./react-agent";
+import { focusedTaskPlan } from "./planner";
 
 describe("buildAmbiguousEditRecoveryMessage", () => {
   it("turns candidate lines into a targeted multi-line patch recovery", () => {
@@ -85,6 +88,69 @@ describe("buildContinueNudge", () => {
     const message = buildContinueNudge(baseCtx(new Set()));
     assert.match(message, /grep_in_file/);
     assert.match(message, /apply_file_edits/);
+  });
+});
+
+describe("buildRecoveryMessage", () => {
+  const makeCtx = (editedPaths: string[]): ReActContext => ({
+    github: {} as ReActContext["github"],
+    repoInfo: { owner: "o", repo: "r" },
+    request: { repoUrl: "o/r", description: "Add dark mode to the home page", branchName: "feature/test" },
+    addProgress: () => {},
+    workingBranch: "feature/test",
+    readCache: new Map(),
+    fullFilePaths: new Set(),
+    editedPaths: new Set(editedPaths),
+    knownPaths: new Set(["app/page.js", "app/layout.js"]),
+    plan: focusedTaskPlan("Add dark mode to the home page", "app/page.js"),
+  });
+
+  it("directs a fix in place when the diff already touches the plan target", () => {
+    const message = buildRecoveryMessage(
+      makeCtx(["app/page.js"]),
+      "The diff defines a theme but never applies it.",
+      "Wrap the rendered UI in <ThemeProvider>.",
+      ["app/page.js"],
+      1,
+      3
+    );
+    assert.match(message, /ALREADY edited the correct file/);
+    assert.match(message, /Finish the implementation in "app\/page\.js"/);
+    assert.match(message, /create_pull_request again/);
+    assert.doesNotMatch(message, /NOT edited yet/);
+  });
+
+  it("keeps the missing-target guidance when the plan target is absent from the diff", () => {
+    const message = buildRecoveryMessage(
+      makeCtx(["app/layout.js"]),
+      "The diff only changes the layout.",
+      "Edit the home page.",
+      ["app/layout.js"],
+      1,
+      3
+    );
+    assert.match(message, /NOT edited yet/);
+    assert.match(message, /"app\/page\.js"/);
+  });
+});
+
+describe("buildPrRetryNudge", () => {
+  it("pushes the model straight back to create_pull_request after a committed fix", () => {
+    const ctx: ReActContext = {
+      github: {} as ReActContext["github"],
+      repoInfo: { owner: "o", repo: "r" },
+      request: { repoUrl: "o/r", description: "Add dark mode", branchName: "feature/test" },
+      addProgress: () => {},
+      workingBranch: "feature/test",
+      readCache: new Map(),
+      fullFilePaths: new Set(),
+      editedPaths: new Set(["app/page.js"]),
+      knownPaths: new Set(),
+    };
+    const message = buildPrRetryNudge(ctx);
+    assert.match(message, /committed successfully/);
+    assert.match(message, /create_pull_request NOW/);
+    assert.match(message, /"feature\/test"/);
   });
 });
 
@@ -193,6 +259,10 @@ describe("resolveReadRef", () => {
   it("honors the working branch after it has been materialized", () => {
     assert.equal(resolveReadRef({ ...baseCtx, branchMaterialized: true }, "feature/test"), "feature/test");
   });
+
+  it("defaults to the working branch once it has commits, so re-reads see the agent's own edits", () => {
+    assert.equal(resolveReadRef({ ...baseCtx, branchMaterialized: true }), "feature/test");
+  });
 });
 
 describe("runReActAgent branch lifecycle", () => {
@@ -273,5 +343,152 @@ describe("runReActAgent branch lifecycle", () => {
 
     assert.equal(result.success, true, JSON.stringify(result));
     assert.deepEqual(capturedDiff?.files, [{ path: "app/page.js", additions: 1, deletions: 0, patchPreview: "+<Box sx={{ bgcolor: '#121212' }}>" }]);
+  });
+
+  it("recovers from a verification failure: fix-in-place guidance, then PR retry nudge, then PR", async () => {
+    const HALF_WIRED_PATCH = `@@ -38,6 +41,8 @@ export default function Home() {
+   const [uploading, setUploading] = useState(false);
++  const [darkMode, setDarkMode] = useState(false);
++  const handleDarkModeToggle = () => setDarkMode((prev) => !prev);`;
+    const WIRED_PATCH = `${HALF_WIRED_PATCH}
+@@ -145,7 +151,7 @@ export default function Home() {
+   return (
+-    <Box>
++    <Box sx={{ bgcolor: darkMode ? '#121212' : '#fff', color: darkMode ? '#fff' : '#000' }}>
+       <Typography variant="h4">Pantry</Typography>`;
+
+    let compareCalls = 0;
+    let executorCalls = 0;
+    let finalMessages: { role: string; content: string }[] = [];
+
+    const ctx: ReActContext = {
+      github: {
+        getRepoContents: async () => [],
+        getRepoTree: async () => [{ path: "app/page.js", type: "file" }],
+        getFileContent: async () => ({ content: "", sha: "" }),
+        getRef: async () => ({ object: { sha: "base" } }),
+        createRef: async () => ({}),
+        createOrUpdateFile: async () => ({}),
+        createPullRequest: async () => ({ html_url: "https://example.test/pr/2", number: 2 }),
+        compareCommits: async () => {
+          compareCalls++;
+          const patch = compareCalls === 1 ? HALF_WIRED_PATCH : WIRED_PATCH;
+          return {
+            ahead_by: compareCalls,
+            files: [{ filename: "app/page.js", additions: 2, deletions: 0, patch }],
+          };
+        },
+        searchCode: async () => [],
+      },
+      repoInfo: { owner: "owner", repo: "repo" },
+      request: { repoUrl: "owner/repo", description: "Add dark mode to the home page", branchName: "feature/test" },
+      addProgress: () => {},
+      workingBranch: "",
+      readCache: new Map(),
+      fullFilePaths: new Set(),
+      editedPaths: new Set(),
+      knownPaths: new Set(),
+    };
+
+    const result = await runReActAgent({ AI: { run: async (_model: string, options: any) => {
+      if ("prompt" in options) return { response: '{"pass":true}' };
+      executorCalls++;
+      finalMessages = options.messages;
+      switch (executorCalls) {
+        case 1:
+          return { tool_calls: [{ name: "commit_files", arguments: { branchName: "feature/test", changes: [{ path: "app/page.js", content: "const [darkMode, setDarkMode] = useState(false);", action: "create" }] } }] };
+        case 2:
+          return { tool_calls: [{ name: "create_pull_request", arguments: { branchName: "feature/test" } }] };
+        case 3:
+          return { tool_calls: [{ name: "commit_files", arguments: { branchName: "feature/test", changes: [{ path: "app/page.js", content: "<Box sx={{ bgcolor: darkMode ? '#121212' : '#fff' }}>", action: "create" }] } }] };
+        default:
+          return { tool_calls: [{ name: "create_pull_request", arguments: { branchName: "feature/test" } }] };
+      }
+    } } } as any, ctx);
+
+    assert.equal(result.success, true, JSON.stringify(result));
+    assert.equal(result.prUrl, "https://example.test/pr/2");
+
+    const userMessages = finalMessages.filter((m) => m.role === "user").map((m) => m.content);
+    assert.ok(
+      userMessages.some((m) => m.includes("ALREADY edited the correct file")),
+      "expected fix-in-place recovery guidance after the verification failure"
+    );
+    assert.ok(
+      userMessages.some((m) => m.includes("create_pull_request NOW")),
+      "expected a PR retry nudge after the committed fix"
+    );
+  });
+
+  it("bounces an identical re-submitted diff without consuming the verify-retry budget", async () => {
+    const HALF_WIRED_PATCH = `@@ -38,6 +41,8 @@ export default function Home() {
+   const [uploading, setUploading] = useState(false);
++  const [darkMode, setDarkMode] = useState(false);
++  const handleDarkModeToggle = () => setDarkMode((prev) => !prev);`;
+    const WIRED_PATCH = `${HALF_WIRED_PATCH}
+@@ -145,7 +151,7 @@ export default function Home() {
+   return (
+-    <Box>
++    <Box sx={{ bgcolor: darkMode ? '#121212' : '#fff', color: darkMode ? '#fff' : '#000' }}>
+       <Typography variant="h4">Pantry</Typography>`;
+
+    let compareCalls = 0;
+    let executorCalls = 0;
+    let finalMessages: { role: string; content: string }[] = [];
+
+    const ctx: ReActContext = {
+      github: {
+        getRepoContents: async () => [],
+        getRepoTree: async () => [{ path: "app/page.js", type: "file" }],
+        getFileContent: async () => ({ content: "", sha: "" }),
+        getRef: async () => ({ object: { sha: "base" } }),
+        createRef: async () => ({}),
+        createOrUpdateFile: async () => ({}),
+        createPullRequest: async () => ({ html_url: "https://example.test/pr/3", number: 3 }),
+        compareCommits: async () => {
+          compareCalls++;
+          // Calls 1 and 2 (initial verify + stubborn resubmission) see the
+          // identical half-wired diff; only call 3 (after the fix) changes.
+          const patch = compareCalls <= 2 ? HALF_WIRED_PATCH : WIRED_PATCH;
+          return {
+            ahead_by: compareCalls,
+            files: [{ filename: "app/page.js", additions: 2, deletions: 0, patch }],
+          };
+        },
+        searchCode: async () => [],
+      },
+      repoInfo: { owner: "owner", repo: "repo" },
+      request: { repoUrl: "owner/repo", description: "Add dark mode to the home page", branchName: "feature/test" },
+      addProgress: () => {},
+      workingBranch: "",
+      readCache: new Map(),
+      fullFilePaths: new Set(),
+      editedPaths: new Set(),
+      knownPaths: new Set(),
+    };
+
+    const result = await runReActAgent({ AI: { run: async (_model: string, options: any) => {
+      if ("prompt" in options) return { response: '{"pass":true}' };
+      executorCalls++;
+      finalMessages = options.messages;
+      switch (executorCalls) {
+        case 1:
+          return { tool_calls: [{ name: "commit_files", arguments: { branchName: "feature/test", changes: [{ path: "app/page.js", content: "const [darkMode, setDarkMode] = useState(false);", action: "create" }] } }] };
+        case 2: // rejected by verification (attempt 1)
+        case 3: // stubborn identical re-submission — must be bounced, not counted
+          return { tool_calls: [{ name: "create_pull_request", arguments: { branchName: "feature/test" } }] };
+        case 4:
+          return { tool_calls: [{ name: "commit_files", arguments: { branchName: "feature/test", changes: [{ path: "app/page.js", content: "<Box sx={{ bgcolor: darkMode ? '#121212' : '#fff' }}>", action: "create" }] } }] };
+        default:
+          return { tool_calls: [{ name: "create_pull_request", arguments: { branchName: "feature/test" } }] };
+      }
+    } } } as any, ctx);
+
+    assert.equal(result.success, true, JSON.stringify(result));
+    const userMessages = finalMessages.filter((m) => m.role === "user").map((m) => m.content);
+    assert.ok(
+      userMessages.some((m) => m.includes("WITHOUT changing any code")),
+      "expected the unchanged-diff nudge after the identical re-submission"
+    );
   });
 });

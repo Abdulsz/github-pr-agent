@@ -23,6 +23,7 @@
   "license": "MIT",
   "dependencies": {
     "@ai-sdk/openai": "^3.0.26",
+    "@cloudflare/sandbox": "^0.12.1",
     "@cloudflare/workers-types": "^4.20260210.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@vitejs/plugin-react": "^4.7.0",

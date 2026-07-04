@@ -41,11 +41,14 @@ export function isEditAllowed(
   );
   if (primaryEdited) return { allowed: true };
 
+  const target = primaryPaths[0];
   return {
     allowed: false,
     reason:
       `Editing "${path}" is blocked: it is a cross-cutting layout/theme/global file and ` +
       `you have not yet edited the planned target file(s): ${primaryPaths.join(", ")}. ` +
-      `Implement the change in ${primaryPaths[0]} first, then expand here only if a real dependency requires it.`,
+      `Do NOT retry this file. Your next action: grep_in_file("${target}", "return \\\\(") ` +
+      `then read_file_section around the match, then apply_file_edits on "${target}". ` +
+      `Expand to "${path}" only if a real dependency requires it afterwards.`,
   };
 }
