@@ -4,12 +4,13 @@ import { encryptToken } from "../feedback/auth";
 const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const GITHUB_API_URL = "https://api.github.com";
-const OAUTH_SCOPES = "repo";
+// user:email lets the login flow read the primary email for account creation
+const OAUTH_SCOPES = "repo user:email";
 const STATE_TTL_SECONDS = 10 * 60;
 
 export interface GitHubOAuthState {
   nonce: string;
-  context: "agent" | "dashboard";
+  context: "agent" | "dashboard" | "login";
   agentName?: string;
   userId?: string;
   returnTo: string;
@@ -30,6 +31,7 @@ export interface GitHubUserProfile {
   id: number;
   login: string;
   name?: string;
+  email?: string | null;
 }
 
 function base64UrlEncode(data: string): string {
@@ -203,6 +205,43 @@ export async function fetchGitHubUser(accessToken: string): Promise<GitHubUserPr
   }
 
   return response.json() as Promise<GitHubUserProfile>;
+}
+
+/**
+ * Best email available for account creation: the profile's public email,
+ * else the primary verified email from /user/emails, else a noreply address.
+ */
+export async function resolveGitHubEmail(
+  accessToken: string,
+  profile: GitHubUserProfile
+): Promise<string> {
+  if (profile.email) return profile.email.toLowerCase();
+
+  try {
+    const response = await fetch(`${GITHUB_API_URL}/user/emails`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "GitHub-PR-Agent-Cloudflare",
+      },
+    });
+    if (response.ok) {
+      const emails = (await response.json()) as Array<{
+        email: string;
+        primary: boolean;
+        verified: boolean;
+      }>;
+      const best =
+        emails.find((e) => e.primary && e.verified) ||
+        emails.find((e) => e.verified) ||
+        emails[0];
+      if (best) return best.email.toLowerCase();
+    }
+  } catch {
+    // Fall through to the noreply address
+  }
+
+  return `${profile.login.toLowerCase()}@users.noreply.github.com`;
 }
 
 export async function encryptGitHubAccessToken(
