@@ -33,6 +33,20 @@ export interface PRResult {
   branchName?: string;
 }
 
+/** Bounded compare-diff evidence captured before a ReAct PR is verified. */
+export interface DiffSummary {
+  baseBranch: string;
+  headBranch: string;
+  aheadBy: number;
+  files: Array<{
+    path: string;
+    additions?: number;
+    deletions?: number;
+    patchPreview: string;
+  }>;
+  capturedAt: number;
+}
+
 /** A single step in the execution plan */
 export interface PlanStep {
   id: string;
@@ -47,6 +61,29 @@ export interface PlanStep {
 export interface ExecutionPlan {
   steps: PlanStep[];
   currentStepIndex: number;
+  createdAt: number;
+}
+
+/** A single decomposed unit of work produced by the planner (AD-004). */
+export interface PlanSubtask {
+  /** What to do for this subtask. */
+  title: string;
+  /** Repo file paths this subtask is expected to touch (may include new files). */
+  files: string[];
+  /** Concrete, checkable outcomes that prove this subtask is done. */
+  acceptance: string[];
+}
+
+/**
+ * A task plan produced before any edits, decomposing a feature into ordered
+ * subtasks plus overall acceptance criteria used to verify completeness.
+ */
+export interface TaskPlan {
+  /** One-sentence description of the chosen approach. */
+  summary: string;
+  subtasks: PlanSubtask[];
+  /** Overall checks that must all hold before opening a PR. */
+  acceptanceCriteria: string[];
   createdAt: number;
 }
 
@@ -84,6 +121,12 @@ export interface AgentState {
 
   // Structured multi-step execution plan
   plan?: ExecutionPlan;
+
+  // AD-004: decomposed task plan (subtasks + acceptance criteria)
+  taskPlan?: TaskPlan;
+
+  // Latest bounded compare diff inspected by the ReAct PR verification gate.
+  diffSummary?: DiffSummary;
 }
 
 export interface ChatMessage {
