@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { GitHubConnectButton } from "../components/GitHubConnect";
 
 interface AuthPageProps {
   onAuth: (token: string, user: { id: string; email: string; name?: string }) => void;
@@ -6,48 +7,65 @@ interface AuthPageProps {
 }
 
 export function AuthPage({ onAuth, onBackHome }: AuthPageProps) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
+  // Complete the sign-in when GitHub redirects back with a session token
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const token = hashParams.get("token");
+    const githubStatus = params.get("github");
 
-    try {
-      const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
-      const body: Record<string, string> = { email, password };
-      if (mode === "register" && name.trim()) body.name = name.trim();
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const data = (await res.json()) as {
-        success: boolean;
-        data?: { token: string; user: { id: string; email: string; name?: string } };
-        error?: string;
-      };
-
-      if (!data.success || !data.data) {
-        setError(data.error || "Something went wrong");
-        return;
-      }
-
-      localStorage.setItem("authToken", data.data.token);
-      localStorage.setItem("authUser", JSON.stringify(data.data.user));
-      onAuth(data.data.token, data.data.user);
-    } catch {
-      setError("Network error. Please try again.");
-    } finally {
-      setLoading(false);
+    if (githubStatus === "error") {
+      setError(params.get("message") || "GitHub sign-in failed. Please try again.");
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
     }
+
+    if (!token) return;
+
+    window.history.replaceState({}, "", window.location.pathname);
+    setFinishing(true);
+
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = (await res.json()) as {
+          success: boolean;
+          data?: { id: string; email: string; name?: string };
+          error?: string;
+        };
+
+        if (!data.success || !data.data) {
+          setError(data.error || "Sign-in failed. Please try again.");
+          return;
+        }
+
+        localStorage.setItem("authToken", token);
+        localStorage.setItem("authUser", JSON.stringify(data.data));
+        onAuth(token, data.data);
+      } catch {
+        setError("Network error. Please try again.");
+      } finally {
+        setFinishing(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleGitHubSignIn() {
+    setRedirecting(true);
+    setError("");
+    const params = new URLSearchParams({
+      context: "login",
+      returnTo: "/auth",
+      frontendOrigin: window.location.origin,
+    });
+    window.location.href = `/api/github/oauth/authorize?${params.toString()}`;
   }
 
   return (
@@ -59,87 +77,27 @@ export function AuthPage({ onAuth, onBackHome }: AuthPageProps) {
               Back to DevFeedback
             </button>
           )}
-          <h1 style={styles.title}>{mode === "login" ? "Sign in" : "Create account"}</h1>
-          <p style={styles.subtitle}>Access your feedback workspace.</p>
+          <h1 style={styles.title}>Sign in</h1>
+          <p style={styles.subtitle}>
+            One GitHub sign-in unlocks your feedback workspace and auto-PRs.
+          </p>
         </header>
 
         <div style={styles.panel}>
-          <form onSubmit={handleSubmit}>
-            {mode === "register" && (
-              <div>
-                <label style={styles.label}>Name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Your name"
-                  style={styles.input}
-                  disabled={loading}
-                />
-              </div>
-            )}
+          {error && <div style={styles.errorBox}>{error}</div>}
 
-            <label style={styles.label}>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              style={styles.input}
-              required
-              disabled={loading}
-            />
+          <GitHubConnectButton
+            onClick={handleGitHubSignIn}
+            loading={redirecting || finishing}
+            label={finishing ? "Finishing sign-in..." : "Continue with GitHub"}
+            variant="light"
+          />
 
-            <label style={styles.label}>Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={mode === "register" ? "At least 8 characters" : "Your password"}
-              style={styles.input}
-              required
-              minLength={mode === "register" ? 8 : undefined}
-              disabled={loading}
-            />
-
-            {error && <div style={styles.errorBox}>{error}</div>}
-
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                ...styles.button,
-                ...styles.primaryButton,
-                ...(loading ? styles.disabledButton : {}),
-                width: "100%",
-                marginTop: 8,
-              }}
-            >
-              {loading
-                ? mode === "login"
-                  ? "Signing in..."
-                  : "Creating account..."
-                : mode === "login"
-                  ? "Sign in"
-                  : "Create account"}
-            </button>
-          </form>
-
-          <div style={styles.switchRow}>
-            <span style={styles.mutedText}>
-              {mode === "login" ? "Need an account?" : "Already have an account?"}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setMode(mode === "login" ? "register" : "login");
-                setError("");
-              }}
-              style={styles.switchButton}
-            >
-              {mode === "login" ? "Sign up" : "Sign in"}
-            </button>
-          </div>
+          <p style={styles.helpText}>
+            We request <code>repo</code> scope so the agent can open pull requests
+            on your behalf, and <code>user:email</code> to create your account.
+            No separate GitHub connection step is needed later.
+          </p>
         </div>
       </main>
     </div>
@@ -193,72 +151,25 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 3,
     padding: "1.5rem",
     border: "1px solid rgba(0,0,0,0.2)",
-  },
-  label: {
-    display: "block",
-    marginBottom: "0.5rem",
-    fontWeight: 700,
-    color: "#000",
-    fontSize: "0.88rem",
-  },
-  input: {
-    width: "100%",
-    padding: "0.78rem 0.9rem",
-    borderRadius: 3,
-    border: "1px solid rgba(0,0,0,0.24)",
-    background: "#fff",
-    color: "#000",
-    fontSize: "1rem",
-    marginBottom: "1rem",
-    outline: "none",
-    boxSizing: "border-box",
-  },
-  button: {
-    padding: "0.86rem 1.3rem",
-    borderRadius: 3,
-    border: "1px solid #000",
-    fontWeight: 800,
-    fontSize: "0.96rem",
-    cursor: "pointer",
-    fontFamily: "inherit",
-  },
-  primaryButton: {
-    background: "#000",
-    color: "#fff",
-  },
-  disabledButton: {
-    opacity: 0.5,
-    cursor: "not-allowed",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: "1rem",
   },
   errorBox: {
     background: "#fff",
     border: "1px solid #000",
     borderRadius: 3,
     padding: "0.75rem 0.9rem",
-    marginBottom: "1rem",
     color: "#000",
     fontSize: "0.9rem",
+    width: "100%",
+    boxSizing: "border-box",
   },
-  switchRow: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: "0.5rem",
-    marginTop: "1.35rem",
-    fontSize: "0.9rem",
-  },
-  mutedText: {
+  helpText: {
+    margin: 0,
     color: "rgba(0,0,0,0.62)",
-  },
-  switchButton: {
-    background: "none",
-    border: "none",
-    color: "#000",
-    textDecoration: "underline",
-    textUnderlineOffset: "3px",
-    cursor: "pointer",
-    fontWeight: 800,
-    fontSize: "0.9rem",
-    padding: 0,
+    fontSize: "0.85rem",
+    lineHeight: 1.5,
   },
 };

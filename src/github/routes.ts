@@ -1,6 +1,6 @@
 import type { Env } from "../types";
 import type { FeedbackDB } from "../feedback/db";
-import { authenticateRequest, decryptToken } from "../feedback/auth";
+import { authenticateRequest, decryptToken, signJWT } from "../feedback/auth";
 import {
   buildGitHubAuthorizeUrl,
   connectAgentWithToken,
@@ -10,7 +10,11 @@ import {
   fetchGitHubUser,
   getOAuthRedirectUri,
   redirectWithStatus,
+  resolveGitHubEmail,
   verifyOAuthState,
+  type GitHubOAuthState,
+  type GitHubTokenResponse,
+  type GitHubUserProfile,
 } from "./oauth";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -66,9 +70,12 @@ async function handleAuthorize(
   }
 
   const url = new URL(request.url);
-  let context: "agent" | "dashboard" =
-    url.searchParams.get("context") === "dashboard" ? "dashboard" : "agent";
-  let returnTo = url.searchParams.get("returnTo") || (context === "dashboard" ? "/projects" : "/agent");
+  const contextParam = url.searchParams.get("context");
+  let context: "agent" | "dashboard" | "login" =
+    contextParam === "dashboard" || contextParam === "login" ? contextParam : "agent";
+  let returnTo =
+    url.searchParams.get("returnTo") ||
+    (context === "dashboard" ? "/projects" : context === "login" ? "/auth" : "/agent");
   let agentName = url.searchParams.get("agentName") || undefined;
   let frontendOrigin = url.searchParams.get("frontendOrigin") || undefined;
 
@@ -135,15 +142,18 @@ async function handleCallback(
     frontendOrigin?: string
   ) => redirectWithStatus(returnTo, status, request.url, message, frontendOrigin);
 
+  // Verify state first so errors (e.g. the user cancelled on GitHub) return
+  // to the page that started the flow instead of always landing on /agent.
+  const state = stateParam ? await verifyOAuthState(stateParam, env.JWT_SECRET) : null;
+
   if (githubError) {
-    return redirect("/agent", "error", githubError);
+    return redirect(state?.returnTo || "/agent", "error", githubError, state?.frontendOrigin);
   }
 
   if (!code || !stateParam) {
-    return redirect("/agent", "error", "Missing OAuth code or state");
+    return redirect(state?.returnTo || "/agent", "error", "Missing OAuth code or state", state?.frontendOrigin);
   }
 
-  const state = await verifyOAuthState(stateParam, env.JWT_SECRET);
   if (!state) {
     return redirect("/agent", "error", "Invalid or expired OAuth state");
   }
@@ -152,6 +162,10 @@ async function handleCallback(
     const redirectUri = getOAuthRedirectUri(request, env);
     const tokenData = await exchangeCodeForToken(code, redirectUri, env);
     const githubUser = await fetchGitHubUser(tokenData.access_token);
+
+    if (state.context === "login") {
+      return handleLoginCallback(request, env, db, state, tokenData, githubUser);
+    }
 
     if (state.context === "agent" && state.agentName) {
       const result = await connectAgentWithToken(env, state.agentName, tokenData.access_token);
@@ -186,6 +200,77 @@ async function handleCallback(
     const message = error instanceof Error ? error.message : "GitHub OAuth failed";
     return redirect(state.returnTo, "error", message, state.frontendOrigin);
   }
+}
+
+/**
+ * GitHub sign-in for the dashboard itself: find or create the dashboard user
+ * from the GitHub profile, store the OAuth token as their GitHub connection
+ * (so auto-PR works without a second sign-in), and hand the session JWT back
+ * to the SPA in the URL fragment.
+ */
+async function handleLoginCallback(
+  request: Request,
+  env: Env,
+  db: FeedbackDB,
+  state: GitHubOAuthState,
+  tokenData: GitHubTokenResponse,
+  githubUser: GitHubUserProfile
+): Promise<Response> {
+  const email = await resolveGitHubEmail(tokenData.access_token, githubUser);
+
+  let user = await db.getUserByGitHubId(githubUser.id);
+
+  if (!user) {
+    // Link a pre-existing email/password account with the same email
+    const existing = await db.getUserByEmail(email);
+    if (existing) {
+      await db.setUserGitHubId(existing.id, githubUser.id);
+      user = existing;
+    }
+  }
+
+  if (!user) {
+    const userId = crypto.randomUUID();
+    await db.createUser({
+      id: userId,
+      email,
+      passwordHash: "",
+      name: githubUser.name || githubUser.login,
+      githubUserId: githubUser.id,
+    });
+    user = await db.getUser(userId);
+  }
+
+  if (!user) {
+    return redirectWithStatus(
+      state.returnTo,
+      "error",
+      request.url,
+      "Failed to create account",
+      state.frontendOrigin
+    );
+  }
+
+  const encryptedToken = await encryptGitHubAccessToken(
+    tokenData.access_token,
+    env.JWT_SECRET
+  );
+  await db.upsertGitHubConnection({
+    userId: user.id,
+    accessToken: encryptedToken,
+    githubUserId: githubUser.id,
+    githubUsername: githubUser.login,
+    scopes: tokenData.scope,
+  });
+
+  const jwt = await signJWT(user.id, user.email, env.JWT_SECRET);
+
+  const origin = state.frontendOrigin || new URL(request.url).origin;
+  const url = new URL(state.returnTo, origin);
+  url.searchParams.set("github", "connected");
+  // Fragment keeps the token out of server logs and proxies
+  url.hash = `token=${jwt}`;
+  return Response.redirect(url.toString(), 302);
 }
 
 async function handleStatus(

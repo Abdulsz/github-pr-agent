@@ -68,6 +68,7 @@ export class FeedbackDB {
           email TEXT UNIQUE NOT NULL,
           passwordHash TEXT NOT NULL,
           name TEXT,
+          githubUserId INTEGER,
           createdAt TEXT NOT NULL
         )
       `),
@@ -87,6 +88,20 @@ export class FeedbackDB {
         )
       `),
     ]);
+
+    // Tables created before GitHub sign-in lack the githubUserId column
+    try {
+      await this.db
+        .prepare(`ALTER TABLE dashboard_users ADD COLUMN githubUserId INTEGER`)
+        .run();
+    } catch {
+      // Column already exists
+    }
+    await this.db
+      .prepare(
+        `CREATE INDEX IF NOT EXISTS idx_users_github ON dashboard_users(githubUserId)`
+      )
+      .run();
 
     this.initialized = true;
   }
@@ -286,17 +301,19 @@ export class FeedbackDB {
     email: string;
     passwordHash: string;
     name?: string;
+    githubUserId?: number;
   }) {
     return this.db
       .prepare(
-        `INSERT INTO dashboard_users (id, email, passwordHash, name, createdAt)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO dashboard_users (id, email, passwordHash, name, githubUserId, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
       .bind(
         user.id,
         user.email,
         user.passwordHash,
         user.name ?? null,
+        user.githubUserId ?? null,
         new Date().toISOString()
       )
       .run();
@@ -316,6 +333,21 @@ export class FeedbackDB {
       .bind(userId)
       .first();
     return (row as DashboardUser | null) ?? null;
+  }
+
+  async getUserByGitHubId(githubUserId: number): Promise<DashboardUser | null> {
+    const row = await this.db
+      .prepare(`SELECT * FROM dashboard_users WHERE githubUserId = ?`)
+      .bind(githubUserId)
+      .first();
+    return (row as DashboardUser | null) ?? null;
+  }
+
+  async setUserGitHubId(userId: string, githubUserId: number) {
+    return this.db
+      .prepare(`UPDATE dashboard_users SET githubUserId = ? WHERE id = ?`)
+      .bind(githubUserId, userId)
+      .run();
   }
 
   // --- GitHub OAuth connections ---

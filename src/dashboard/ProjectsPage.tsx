@@ -214,8 +214,8 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
                 {githubLoading
                   ? "Checking connection..."
                   : githubStatus.connected
-                    ? `Connected as @${githubStatus.username}`
-                    : "Sign in with GitHub to enable auto-PR for your projects"}
+                    ? `Connected as @${githubStatus.username} — auto-PRs use this account`
+                    : "Your GitHub connection was removed. Reconnect to enable auto-PR."}
               </p>
             </div>
             {!githubLoading && (
@@ -228,7 +228,7 @@ export function ProjectsPage({ token, onLogout, onSelectProject, onHome, onOpenA
                   onClick={handleConnectGitHub}
                   loading={connectingGithub}
                   variant="light"
-                  label="Connect GitHub"
+                  label="Reconnect GitHub"
                 />
               )
             )}

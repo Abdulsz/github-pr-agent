@@ -191,8 +191,10 @@ export interface FeedbackProjectSettings {
 export interface DashboardUser {
   id: string;
   email: string;
+  /** Empty string for accounts created via GitHub sign-in */
   passwordHash: string;
   name?: string;
+  githubUserId?: number | null;
   createdAt: string;
 }
 
