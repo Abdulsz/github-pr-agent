@@ -23,6 +23,8 @@
   "license": "MIT",
   "dependencies": {
     "@ai-sdk/openai": "^3.0.26",
+    "@cloudflare/ai-chat": "^0.0.7",
+    "@cloudflare/codemode": "^0.0.7",
     "@cloudflare/sandbox": "^0.12.1",
     "@cloudflare/workers-types": "^4.20260210.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
@@ -34,7 +36,7 @@
     "typescript": "^5.9.3",
     "vite": "^5.4.21",
     "workers-ai-provider": "^3.0.0",
-    "wrangler": "^4.64.0",
+    "wrangler": "^4.126.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

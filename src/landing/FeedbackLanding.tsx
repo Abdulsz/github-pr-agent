@@ -1,6 +1,35 @@
 import { useState } from "react";
 
+const API_ORIGIN = "https://github-pr-agent.zakariatimalma.workers.dev";
 const NPM = "npm install @devfeedback/react-widget";
+const HTML_SNIPPET = `<script src="${API_ORIGIN}/embed.js"></script>
+<script>
+  FeedbackWidget.init({
+    projectId: "YOUR_PROJECT_ID",
+    apiKey: "YOUR_API_KEY",
+    theme: "light",
+    position: "bottom-right",
+    primaryColor: "#d7ff3f",
+    title: "Help us improve!",
+    onSubmit: function (data) {
+      console.log("Submitted:", data);
+    }
+  });
+</script>`;
+const REACT_SNIPPET = `import { FeedbackWidget } from "@devfeedback/react-widget";
+
+<FeedbackWidget
+  projectId="YOUR_PROJECT_ID"
+  apiKey="YOUR_API_KEY"
+  apiBaseUrl="${API_ORIGIN}"
+  config={{
+    theme: "dark",
+    position: "bottom-right",
+    primaryColor: "#d7ff3f",
+    title: "Help us improve!",
+  }}
+  onSubmit={(data) => console.log("Submitted:", data)}
+/>`;
 const fontBody = '"Manrope", -apple-system, BlinkMacSystemFont, sans-serif';
 const fontDisplay = '"Archivo", "Manrope", -apple-system, BlinkMacSystemFont, sans-serif';
 
@@ -26,12 +55,21 @@ export function FeedbackLanding({
   onSignIn: () => void;
   onOpenAgent: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [snippet, setSnippet] = useState<"html" | "react">("html");
 
-  function copyInstall() {
-    void navigator.clipboard.writeText(NPM);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
+  function copyText(id: string, text: string) {
+    void navigator.clipboard.writeText(text);
+    setCopied(id);
+    setTimeout(() => setCopied(null), 1600);
+  }
+
+  function scrollToWidget() {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById("widget")?.scrollIntoView({
+      behavior: reduce ? "auto" : "smooth",
+      block: "start",
+    });
   }
 
   return (
@@ -39,15 +77,23 @@ export function FeedbackLanding({
       <style>{motionCss}</style>
       <div aria-hidden="true" style={styles.grain} />
       <header style={styles.navOuter}>
-        <div style={styles.nav}>
-          <button type="button" onClick={onSignIn} style={styles.brandButton}>
+        <div style={styles.nav} className="df-nav">
+          <button type="button" onClick={onSignIn} style={styles.brandButton} className="df-brand">
             DevFeedback
           </button>
-          <nav style={styles.navActions}>
-            <button type="button" onClick={onOpenAgent} style={styles.navLink} className="df-btn-ghost">
+          <nav style={styles.navActions} className="df-nav-actions">
+            <button type="button" onClick={scrollToWidget} style={styles.navLink} className="df-btn-ghost df-nav-compact">
+              Widget
+            </button>
+            <button
+              type="button"
+              onClick={onOpenAgent}
+              style={styles.navLink}
+              className="df-btn-ghost df-nav-compact df-nav-agent"
+            >
               PR Agent
             </button>
-            <button type="button" onClick={onSignIn} style={styles.navPrimary} className="df-btn-primary">
+            <button type="button" onClick={onSignIn} style={styles.navPrimary} className="df-btn-primary df-nav-compact">
               Dashboard
             </button>
           </nav>
@@ -135,14 +181,101 @@ export function FeedbackLanding({
           </div>
         </section>
 
-        <section style={styles.installSection}>
-          <div style={styles.installLayout} className="df-section-grid">
-            <h2 style={styles.installTitle}>Add the widget, then triage from the dashboard.</h2>
-            <div style={styles.codeRow}>
-              <code style={styles.code}>{NPM}</code>
-              <button type="button" onClick={copyInstall} style={styles.copyBtn} className="df-btn-primary">
-                {copied ? "Copied" : "Copy"}
-              </button>
+        <section id="widget" style={styles.widgetSection} className="df-widget-section">
+          <div style={styles.widgetInner} className="df-widget-inner">
+            <h2 style={styles.widgetTitle}>Add the widget with one script tag.</h2>
+            <p style={styles.widgetLead}>
+              Create a project, copy the ID and API key, and paste this on any page. Reports land in
+              your dashboard inbox.
+            </p>
+
+            <div style={styles.snippetShell}>
+              <div style={styles.snippetHead} className="df-snippet-head">
+                <div style={styles.snippetTabs} className="df-snippet-tabs" role="tablist" aria-label="Widget install snippets">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={snippet === "html"}
+                    onClick={() => setSnippet("html")}
+                    style={{
+                      ...styles.snippetTab,
+                      ...(snippet === "html" ? styles.snippetTabActive : {}),
+                    }}
+                    className={snippet === "html" ? "df-btn-ghost df-snippet-tab-active" : "df-btn-ghost"}
+                  >
+                    HTML / JS
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={snippet === "react"}
+                    onClick={() => setSnippet("react")}
+                    style={{
+                      ...styles.snippetTab,
+                      ...(snippet === "react" ? styles.snippetTabActive : {}),
+                    }}
+                    className={snippet === "react" ? "df-btn-ghost df-snippet-tab-active" : "df-btn-ghost"}
+                  >
+                    React
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => copyText(snippet, snippet === "html" ? HTML_SNIPPET : REACT_SNIPPET)}
+                  style={styles.copyBtn}
+                  className="df-btn-primary df-snippet-copy"
+                >
+                  {copied === snippet ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <pre style={styles.snippetPre} className="df-code-pre" tabIndex={0}>
+                <code style={styles.snippetCode}>{snippet === "html" ? HTML_SNIPPET : REACT_SNIPPET}</code>
+              </pre>
+            </div>
+
+            {snippet === "react" ? (
+              <div style={styles.npmRow} className="df-npm-row">
+                <code style={styles.code}>{NPM}</code>
+                <button
+                  type="button"
+                  onClick={() => copyText("npm", NPM)}
+                  style={styles.copyBtn}
+                  className="df-btn-primary"
+                >
+                  {copied === "npm" ? "Copied" : "Copy"}
+                </button>
+              </div>
+            ) : null}
+
+            <div style={styles.widgetNotes} className="df-widget-notes">
+              <div style={styles.noteBlock}>
+                <h3 style={styles.noteHeading}>What you need</h3>
+                <p style={styles.noteBody}>
+                  After you create a project, copy <code>projectId</code> and <code>apiKey</code> from
+                  the dashboard and replace the placeholders. The script host is also the API host, so
+                  you do not set a base URL for the HTML embed.
+                </p>
+                <p style={styles.noteBody}>
+                  The widget posts to <code>POST /api/feedback/submit</code> with an{" "}
+                  <code>X-API-Key</code> header. CORS is open, so it works from any domain. Title and
+                  description are required. Email is optional.
+                </p>
+              </div>
+              <div style={styles.noteBlock}>
+                <h3 style={styles.noteHeading}>Init options</h3>
+                <p style={styles.noteBody}>
+                  Required: <code>projectId</code>, <code>apiKey</code>. Optional:{" "}
+                  <code>theme</code> (light or dark), <code>position</code> (bottom-right, bottom-left,
+                  top-right, top-left), <code>primaryColor</code>, <code>title</code>,{" "}
+                  <code>showEmail</code>.
+                </p>
+                <p style={styles.noteBody}>
+                  Callbacks: <code>onSubmit</code>, <code>onError</code>, <code>onOpen</code>. After
+                  init, call <code>FeedbackWidget.open()</code>, <code>close()</code>, or{" "}
+                  <code>destroy()</code>. React users should also pass <code>apiBaseUrl</code> when the
+                  app is not on this origin.
+                </p>
+              </div>
             </div>
           </div>
         </section>
@@ -187,6 +320,39 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .df-hero-signal { animation: none; }
   button { transition: none !important; }
 }
+#widget { scroll-margin-top: 16px; }
+.df-widget-inner { min-width: 0; max-width: 100%; }
+.df-widget-notes code {
+  border-radius: 0;
+  border-color: rgba(244,244,241,0.16);
+  color: #f4f4f1;
+  word-break: break-word;
+}
+.df-snippet-tab-active {
+  background: #f4f4f1 !important;
+  color: #0a0a0a !important;
+  border-color: #f4f4f1 !important;
+}
+.df-snippet-tab-active:hover {
+  background: #d7ff3f !important;
+  border-color: #d7ff3f !important;
+  color: #0a0a0a !important;
+}
+.df-code-pre {
+  scrollbar-color: rgba(244,244,241,0.28) transparent;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.df-code-pre code {
+  border: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  font-size: inherit !important;
+  background: transparent !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
 @media (max-width: 1080px) {
   .df-proof-grid { grid-template-columns: 1fr 1fr !important; }
 }
@@ -195,6 +361,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .df-hero-copy { align-self: start !important; }
   .df-section-grid { grid-template-columns: 1fr !important; }
   .df-signal-board { min-height: 420px !important; }
+  .df-widget-notes { grid-template-columns: 1fr !important; }
+}
+@media (max-width: 640px) {
+  .df-nav { padding: 0 16px !important; }
+  .df-nav-actions { gap: 6px !important; }
+  .df-nav-compact { padding: 8px 9px !important; font-size: 0.8rem !important; }
+  .df-widget-section { padding: 56px 16px !important; }
+  .df-snippet-head {
+    flex-wrap: wrap !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+  .df-snippet-copy { width: 100%; }
+  .df-code-pre { font-size: 0.75rem !important; padding: 14px 12px !important; }
+  .df-npm-row { flex-wrap: wrap !important; }
+  .df-npm-row button { width: 100%; }
+}
+@media (max-width: 480px) {
+  .df-nav-agent { display: none !important; }
+  .df-brand { font-size: 0.92rem !important; }
+  .df-snippet-tabs button { padding: 10px 12px !important; flex: 1; }
 }
 @media (max-width: 560px) {
   .df-hero-grid { padding-left: 20px !important; padding-right: 20px !important; }
@@ -213,6 +400,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: theme.ink,
     color: theme.paper,
     fontFamily: fontBody,
+    overflowX: "hidden",
   },
   grain: {
     position: "fixed",
@@ -496,33 +684,122 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "1.12rem",
     fontWeight: 700,
   },
-  installSection: {
-    padding: "clamp(64px, 8vw, 108px) 32px",
+  widgetSection: {
+    padding: "clamp(72px, 9vw, 128px) 32px",
     borderTop: `1px solid ${theme.line}`,
   },
-  installLayout: {
+  widgetInner: {
     maxWidth: 1376,
     margin: "0 auto",
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 0.9fr) minmax(320px, 0.72fr)",
-    gap: "clamp(36px, 7vw, 96px)",
-    alignItems: "end",
+    minWidth: 0,
   },
-  installTitle: {
+  widgetTitle: {
     margin: 0,
+    maxWidth: 820,
     fontFamily: fontDisplay,
-    fontSize: "clamp(1.8rem, 3.6vw, 3.2rem)",
-    lineHeight: 1.02,
+    fontSize: "clamp(1.55rem, 7vw, 3.4rem)",
+    lineHeight: 1.12,
     letterSpacing: "-0.04em",
     fontWeight: 800,
   },
-  codeRow: {
+  widgetLead: {
+    margin: "18px 0 0",
+    maxWidth: "65ch",
+    color: theme.muted,
+    fontSize: "1.02rem",
+    lineHeight: 1.55,
+  },
+  snippetShell: {
+    marginTop: "clamp(32px, 4vw, 48px)",
+    border: `1px solid ${theme.line}`,
+    background: "rgba(10,10,10,0.55)",
+    minWidth: 0,
+    overflow: "hidden",
+  },
+  snippetHead: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+    padding: 10,
+    borderBottom: `1px solid ${theme.line}`,
+  },
+  snippetTabs: {
+    display: "flex",
+    gap: 8,
+    minWidth: 0,
+    flex: 1,
+  },
+  snippetTab: {
+    border: `1px solid ${theme.line}`,
+    background: "transparent",
+    color: theme.paper,
+    borderRadius: 0,
+    padding: "10px 14px",
+    fontFamily: "inherit",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  snippetTabActive: {
+    border: `1px solid ${theme.paper}`,
+    background: theme.paper,
+    color: theme.ink,
+  },
+  snippetPre: {
+    margin: 0,
+    padding: "22px 20px",
+    overflowX: "auto",
+    maxWidth: "100%",
+    fontSize: "0.88rem",
+    lineHeight: 1.65,
+    fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace',
+  },
+  snippetCode: {
+    display: "block",
+    minWidth: 0,
+    color: theme.paper,
+    border: 0,
+    borderRadius: 0,
+    padding: 0,
+    background: "transparent",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
+  },
+  npmRow: {
+    marginTop: 12,
     display: "flex",
     gap: 10,
     alignItems: "center",
     border: `1px solid ${theme.line}`,
     borderRadius: 0,
     padding: 10,
+  },
+  widgetNotes: {
+    marginTop: "clamp(40px, 5vw, 64px)",
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "clamp(28px, 5vw, 64px)",
+  },
+  noteBlock: {
+    paddingTop: 18,
+    borderTop: `1px solid ${theme.line}`,
+  },
+  noteHeading: {
+    margin: 0,
+    fontFamily: fontDisplay,
+    fontSize: "1.2rem",
+    letterSpacing: "-0.03em",
+    fontWeight: 800,
+  },
+  noteBody: {
+    margin: "12px 0 0",
+    maxWidth: "58ch",
+    color: theme.muted,
+    fontSize: "0.96rem",
+    lineHeight: 1.6,
   },
   code: {
     flex: 1,
@@ -542,6 +819,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: "inherit",
     fontWeight: 800,
     cursor: "pointer",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
   },
   finalCta: {
     position: "relative",
